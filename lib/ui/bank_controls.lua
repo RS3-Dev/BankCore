@@ -2,6 +2,7 @@
 
 local NativeUi = require("lib/ui/native_ui")
 local UICoordinates = require("lib/ui/ui_coordinates")
+local Tooltip = require("lib/ui/tooltip")
 
 local BankControls = {}
 
@@ -62,7 +63,7 @@ function BankControls.button(parent, content, action, options)
         self.icon.clickthrough = true
     end
 
-    prettyui.Tooltip.bind(self, self.root, parent, options.tooltip)
+    self.tooltip = Tooltip.attach(self.root, parent, options.tooltip)
     self:_UpdateState()
     return self
 end
@@ -72,7 +73,8 @@ function NativeButton:_UpdateState()
     self.root.enabled = not self.disabled
     self.root.clickthrough = self.disabled
     self.root.stylesheetID = NativeUi.styleID("BUTTON_PANEL")
-    self.root.text.rgba = self.active and 0xF2C66DFF or 0xE7D7B0FF
+    self.root.text.rgba = self.disabled and 0x82796DFF
+        or self.active and 0xF2C66DFF or 0xE7D7B0FF
     if self.icon ~= nil and self.sprites ~= nil then
         if self.disabled then
             self.icon.spriteID = self.sprites.disabled or self.sprites.neutral
@@ -84,16 +86,24 @@ function NativeButton:_UpdateState()
     end
 end
 
+-- Update both the button's appearance and whether it accepts clicks.
+function NativeButton:SetDisabled(disabled)
+    disabled = disabled == true
+    if self.disabled == disabled then return end
+    self.disabled = disabled
+    self:_UpdateState()
+end
+
 -- Clear the hover effect and tooltip when the button changes shape.
 function NativeButton:StopHover()
-    prettyui.Tooltip.unbind(self)
+    if self.tooltip ~= nil then self.tooltip:Destroy(); self.tooltip = nil end
     self.root:Unsubscribe(ui.Hook.ONMOUSEOVER)
     self.root:Unsubscribe(ui.Hook.ONMOUSELEAVE)
     UICoordinates.untrackPointer(self.root)
 end
 
 function NativeButton:Destroy()
-    prettyui.Tooltip.unbind(self)
+    if self.root ~= nil then self:StopHover() end
     if self.icon ~= nil then self.icon:Destroy() end
     if self.root ~= nil then self.root:Destroy() end
     self.root = nil

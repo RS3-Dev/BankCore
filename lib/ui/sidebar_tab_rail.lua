@@ -17,7 +17,7 @@ local ICON_INSET = math.floor((TAB_SIZE - ICON_SIZE) / 2)
 local ARROW_HEIGHT = 20
 local ARROW_ICON_SIZE = 16
 local MAX_SLOTS = 24
-local BACKDROP_SPRITE = 18035 -- RS3_CHILD_CONTENT_TILE
+local BACKDROP_SPRITE = id.Sprite.RS3_CHILD_CONTENT_TILE
 local DRAG_HOOK = Config.CORE_REF .. "_tab_drag"
 -- Distance in game UI units before a press becomes a drag.
 local DRAG_DISTANCE = 6

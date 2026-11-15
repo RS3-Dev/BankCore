@@ -8,7 +8,7 @@ local ObjectConfig = require("lib/core/object_config")
 local BankPageItems = {}
 BankPageItems.__index = BankPageItems
 
-local BANK_ITEMS_STATIC_ID = BankInterface.ITEMS
+local BANK_ITEMS_COMPONENT_ID = BankInterface.ITEMS
 local GRID_SLOT_SIZE = BankGrid.SLOT_SIZE
 local DEFAULT_ITEM_SIZE = 32
 local PLACEHOLDER_ALPHA = 0.45
@@ -43,7 +43,7 @@ end
 function BankPageItems:IsInSync()
     if not self.active then return false end
 
-    local bankItemLayer = component(BANK_ITEMS_STATIC_ID)
+    local bankItemLayer = component(BANK_ITEMS_COMPONENT_ID)
     if bankItemLayer == nil then return false end
 
     -- Compare slots directly without sorting.
@@ -178,7 +178,7 @@ end
 function BankPageItems:StacksReassigned(freshBankItems)
     if self.view == nil then return false end
     if freshBankItems == nil then
-        local bankItemLayer = component(BANK_ITEMS_STATIC_ID)
+        local bankItemLayer = component(BANK_ITEMS_COMPONENT_ID)
         if bankItemLayer == nil then return true end
         freshBankItems = BankItemIndex.Read(bankItemLayer)
     end
@@ -238,7 +238,7 @@ end
 -- Refresh bank stacks without changing the page arrangement
 function BankPageItems:RefreshBankItems()
     if not self.active then return false end
-    local bankItemLayer = component(BANK_ITEMS_STATIC_ID)
+    local bankItemLayer = component(BANK_ITEMS_COMPONENT_ID)
     if bankItemLayer == nil then return false end
     local items = BankItemIndex.Collect(bankItemLayer)
     self.bankItems = items
@@ -251,7 +251,7 @@ end
 
 -- Read bank items once for the page and its plugin.
 function BankPageItems:ReadBank()
-    local bankItemLayer = component(BANK_ITEMS_STATIC_ID)
+    local bankItemLayer = component(BANK_ITEMS_COMPONENT_ID)
     if bankItemLayer == nil then return nil end
     local items = BankItemIndex.Collect(bankItemLayer)
     self.bankItems = items

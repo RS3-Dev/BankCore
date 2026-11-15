@@ -8,13 +8,14 @@ local ObjectConfig = require("lib/core/object_config")
 local UICoordinates = require("lib/ui/ui_coordinates")
 local relativePosition = UICoordinates.relativePosition
 local Theme = require("lib/ui/theme")
+local Tooltip = require("lib/ui/tooltip")
 
 local BankPageDisplay = {}
 BankPageDisplay.__index = BankPageDisplay
 BankPageScroll.install(BankPageDisplay)
 
-local BANK_ITEMS_STATIC_ID = BankInterface.ITEMS
-local BANK_ITEMS_CONTAINER_STATIC_ID = BankInterface.ITEMS_CONTAINER
+local BANK_ITEMS_COMPONENT_ID = BankInterface.ITEMS
+local BANK_ITEMS_CONTAINER_COMPONENT_ID = BankInterface.ITEMS_CONTAINER
 local GRID_LEFT = BankGrid.LEFT
 local GRID_SLOT_SIZE = BankGrid.SLOT_SIZE
 local GRID_STEP = BankGrid.STEP
@@ -64,10 +65,9 @@ end
 
 function BankPageDisplay:ReadPageArea()
     local all = self.bankView.components.all
-    local bank = ui.Interfaces:GetInterface(Config.BANK_INTERFACE_ID)
-    if bank == nil or all == nil then return nil end
-    local bankItemLayer = bank:GetComponent(BANK_ITEMS_STATIC_ID)
-    local viewport = bank:GetComponent(BANK_ITEMS_CONTAINER_STATIC_ID)
+    if all == nil then return nil end
+    local bankItemLayer = BankInterface.Get(BANK_ITEMS_COMPONENT_ID)
+    local viewport = BankInterface.Get(BANK_ITEMS_CONTAINER_COMPONENT_ID)
     if bankItemLayer == nil or viewport == nil then return nil end
     local layerX, layerY = relativePosition(bankItemLayer, all)
     local viewportX, viewportY = relativePosition(viewport, all)
@@ -127,7 +127,7 @@ function BankPageDisplay:ShowItemName(pageItem, pageArea)
     local parent = self.bankView.components.all
     if self.nameAnchor == nil then
         self.nameAnchor = ui.Layer.new(parent)
-        self.nameTooltip = prettyui.Tooltip.attach(self.nameAnchor, parent, name)
+        self.nameTooltip = Tooltip.attach(self.nameAnchor, parent, name)
         -- The component that positions the tooltip must let clicks through.
         self.nameAnchor.clickthrough = true
     elseif self.nameText ~= name then

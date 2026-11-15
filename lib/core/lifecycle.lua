@@ -15,6 +15,9 @@ local BANK_UPDATE_EVENT = Config.CORE_REF .. "_bank_update"
 local GAME_STATE_EVENT = Config.CORE_REF .. "_game_state"
 local CONTENT_EVENT = Config.CORE_REF .. "_content"
 local SETTINGS_EVENT = Config.CORE_REF .. "_settings"
+local BANK_VISIBILITY_EVENT = Config.CORE_REF .. "_bank_visibility"
+local BANK_VAR_EVENT = Config.CORE_REF .. "_bank_var"
+local BANK_TRANSITION_EVENT = Config.CORE_REF .. "_bank_transition"
 
 function Lifecycle.new(session, options)
     return setmetatable({
@@ -81,7 +84,66 @@ function Lifecycle:Start()
             session.layout:HandleInventoryUpdate()
         end
     end)
-    if session.inGame and options.bankIsOpen() then session:BeginLayoutRetry() end
+    Event.VarTransmit.Subscribe(BANK_VAR_EVENT, function(event)
+        if not session.inGame then return end
+        local name = event.var.configName
+        if name ~= "BANK_TEMP" and name ~= "BANK_RESIZE_CYCLE" then return end
+        debugLog(name, " transmitted: ", event.oldValue, " -> ", event.newValue)
+        -- Coalesce updates and let the game's interface changes finish first.
+        Event.Logic.Subscribe(BANK_TRANSITION_EVENT, function()
+            Event.Logic.Unsubscribe(BANK_TRANSITION_EVENT)
+            if session.shutDown or not session.inGame then return end
+            -- Bank variables also update during deposits and withdrawals.
+            if session.layout.active then
+                local ok, open = pcall(options.bankIsOpen)
+                if ok and open and session.layout:IsAttachedToCurrentBank() then return end
+                session:CloseBank()
+            end
+            session:BeginLayoutRetry()
+        end)
+    end)
+    debugLog("inventory listeners registered; checking existing bank")
+    local function readBankVisibility()
+        if not session.inGame then return false, "not in game" end
+        local ok, open, reason = pcall(options.bankIsOpen)
+        if not ok then return false, "bank detection ERROR: " .. tostring(open) end
+        return open, reason or (open and "bank detected" or "bank not detected")
+    end
+    local bankWasOpen, lastVisibilityReason = readBankVisibility()
+    debugLog("initial bank open=", bankWasOpen, "; reason=", lastVisibilityReason)
+    if bankWasOpen then session:BeginLayoutRetry() end
+    -- Returning from a bank dialog may not add the inventory again.
+    local visibilityTicks = 0
+    Event.Logic.Subscribe(BANK_VISIBILITY_EVENT, function()
+        visibilityTicks = visibilityTicks + 1
+        if visibilityTicks < 10 then return end
+        visibilityTicks = 0
+        local bankOpen, reason = readBankVisibility()
+        if reason ~= lastVisibilityReason then
+            debugLog("bank visibility check: ", reason)
+            lastVisibilityReason = reason
+        end
+        if bankOpen == bankWasOpen then
+            if bankOpen then
+                if session.layout.active and not session.layout:IsAttachedToCurrentBank() then
+                    session:CloseBank()
+                    session:BeginLayoutRetry()
+                else
+                    session:RetryLayoutWhenReady()
+                end
+            end
+            return
+        end
+        debugLog("bank visibility changed: ", bankWasOpen, " -> ", bankOpen)
+        bankWasOpen = bankOpen
+        if bankOpen then
+            session:BeginLayoutRetry()
+        elseif session.layout.active then
+            session:CloseBank()
+        else
+            session:StopLayoutRetry()
+        end
+    end)
 
     debugLog("Bank Core started its bank session")
 end
@@ -107,6 +169,9 @@ function Lifecycle:Shutdown()
     Event.InventoryAdded.Unsubscribe(BANK_OPEN_EVENT)
     Event.InventoryRemoved.Unsubscribe(BANK_CLOSE_EVENT)
     Event.InventoryUpdated.Unsubscribe(BANK_UPDATE_EVENT)
+    Event.VarTransmit.Unsubscribe(BANK_VAR_EVENT)
+    Event.Logic.Unsubscribe(BANK_TRANSITION_EVENT)
+    Event.Logic.Unsubscribe(BANK_VISIBILITY_EVENT)
     session:StopFilterSettle()
     session:StopLayoutRetry()
 

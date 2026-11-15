@@ -1,5 +1,12 @@
 # Local development files and packages
-/tests/
+/tests/*
+!/tests/sanitize_string.lua
+!/tests/bank_dialogs.lua
+!/tests/direct_component_lookup.lua
+!/tests/return_to_bank.lua
+!/tests/tooltip.lua
+!/tests/scrollbar_options.lua
+!/tests/attachment_failure.lua
 /tools/
 /.github/workflows/check.yml
 /dist/

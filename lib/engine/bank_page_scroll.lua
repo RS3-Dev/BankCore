@@ -9,7 +9,7 @@ local Theme = require("lib/ui/theme")
 
 local BankPageScroll = {}
 
-local BANK_ITEMS_CONTAINER_STATIC_ID = BankInterface.ITEMS_CONTAINER
+local BANK_ITEMS_CONTAINER_COMPONENT_ID = BankInterface.ITEMS_CONTAINER
 local GRID_STEP = BankGrid.STEP
 local BANK_VIEWPORT_COLOUR = Theme.VIEW_BACKGROUND
 local ENGINE_SCROLL_HOOK = Config.CORE_REF .. "_engine_scroll"
@@ -104,7 +104,7 @@ end
 -- Remove page scrolling and optionally restore the bank's scroll position.
 function BankPageScroll:DestroyScrollbar(restoreNativeScroll)
     local viewport = restoreNativeScroll and self.nativeScrollY ~= nil
-        and component(BANK_ITEMS_CONTAINER_STATIC_ID) or nil
+        and component(BANK_ITEMS_CONTAINER_COMPONENT_ID) or nil
     if viewport ~= nil then
         -- The scroll area may disappear as the bank closes.
         pcall(function() viewport:SetScrollPos(0, self.nativeScrollY) end)
@@ -126,7 +126,9 @@ function BankPageScroll:RefreshScrollbar(pageArea)
     if self.scrollbar == nil then return end
     pageArea = pageArea or self.pageArea or self:ReadPageArea()
     if pageArea == nil then return end
-    self.scrollbar:Refresh(math.max(1, self:ContentHeightForCurrentLayout()), pageArea.scrollY)
+    local page = self.bankView.shownPage
+    local alwaysShow = page == nil or page.draw == nil or page.alwaysShowScrollbar ~= false
+    self.scrollbar:Refresh(math.max(1, self:ContentHeightForCurrentLayout()), pageArea.scrollY, alwaysShow)
 end
 
 -- Use the measured mouse position; click events do not say where (0, 0) is.

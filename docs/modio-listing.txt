@@ -1,0 +1,33 @@
+Name
+Bank Core
+
+Summary
+Shared bank sidebar, item pages and native bank interactions for compatible RuneScape plugins.
+
+Description
+Bank Core provides the shared bank interface used by compatible bank
+plugins. It gives them sidebar space and item pages while preserving native
+bank item menus and interactions. Install PrettyUI and the bank feature plugins
+you want to use. Core alone does not add tags, categories or searches.
+
+Open your bank, select All Items, then choose a feature plugin from the icon
+rail. Drag the rail icons to reorder them. Each feature plugin owns its own
+controls, page contents and saved data.
+
+Contact
+For support or to report a problem, email plugins@rs3.dev. Include the Core
+version, affected feature plugins and steps to reproduce the problem.
+
+EULA
+Bank Core is distributed under the BSD 2-Clause License. Its full terms,
+copyright notice and warranty disclaimer are included in main.lua. Use of this
+plugin remains subject to Jagex's applicable game and plugin terms.
+
+Data protection
+Core reads bank items and bank interface state to display compatible plugin
+pages and route native item interactions. It stores its debug preference,
+sidebar icon order and bank window recovery settings locally in the client's
+persistentDB. Core makes no HTTP requests and sends no data to external servers.
+Feature plugins manage their own stored data and may have separate data policies.
+If you contact support by email, the information you choose to send is handled
+by the support mailbox provider.
