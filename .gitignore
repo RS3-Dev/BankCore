@@ -1,8 +1,10 @@
 # Local development files and packages
 /tests/
+/scripts/
 /tools/
 /.github/workflows/check.yml
 /dist/
+/docs/modio-listing*.txt
 /*.zip
 *.luac
 luac.out

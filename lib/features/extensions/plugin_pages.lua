@@ -16,6 +16,7 @@ local TAB_PREFIX = "__bankutils_ext_tab:"
 local REFRESH_EVENT = Config.CORE_REF .. "_extension_refresh"
 local NOTIFY_EVENT = Config.CORE_REF .. "_extension_notify"
 local REGISTRATION_FIELDS = { id = true, name = true, icon = true, column = true, customView = true, allowNativeDrag = true,
+    alwaysShowScrollbar = true,
     onClose = true, onBankItems = true, onBankClose = true, onBankStateChanged = true }
 local CALLBACKS = { "customView", "onClose", "onBankItems", "onBankClose", "onBankStateChanged" }
 local PAGE_FIELDS = { title = true, rows = true, allowNativeDrag = true }
@@ -28,7 +29,7 @@ local hasOnlyFields = PlainData.HasOnlyFields
 local function readRegistration(description)
     if type(description) ~= "table" or not hasOnlyFields(description, REGISTRATION_FIELDS) then
         return nil, "a registration is a table of id, name, icon, column, customView, onClose, onBankItems,"
-            .. " onBankClose, onBankStateChanged and optional allowNativeDrag"
+            .. " onBankClose, onBankStateChanged and optional allowNativeDrag and alwaysShowScrollbar"
     end
     local id = rawget(description, "id")
     if not PlainData.ID(id, ID_LENGTH) then
@@ -41,6 +42,14 @@ local function readRegistration(description)
         return nil, "allowNativeDrag must be a boolean"
     end
     registration.allowNativeDrag = allowNativeDrag == true
+    local alwaysShowScrollbar = rawget(description, "alwaysShowScrollbar")
+    if alwaysShowScrollbar ~= nil then
+        if type(alwaysShowScrollbar) ~= "boolean" then return nil, "alwaysShowScrollbar must be a boolean" end
+        if type(rawget(description, "customView")) ~= "function" then
+            return nil, "alwaysShowScrollbar is only supported for customView registrations"
+        end
+    end
+    registration.alwaysShowScrollbar = alwaysShowScrollbar ~= false
     if registration.name == nil then return nil, "name must be 1 to " .. TEXT_LENGTH .. " characters" end
     if registration.icon ~= nil and not PlainData.ValidIcon(registration.icon) then
         return nil, "icon must be a sprite ID from 0 to 2147483647, a PrettyUI name, or a native sprite constant name"
@@ -218,6 +227,7 @@ function PluginPages:RegisterOwner(description)
     if customView ~= nil then
         extension.page = { owner = extension, key = extension.opens, title = extension.name,
             allowNativeDrag = registration.allowNativeDrag,
+            alwaysShowScrollbar = registration.alwaysShowScrollbar,
             draw = function(view) return self:RunPluginCallback(extension, "customView", drawView, customView, view) end }
     end
     self.owners[extension.id] = extension

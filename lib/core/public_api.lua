@@ -20,6 +20,12 @@ end
 -- Keep only functions here because the game copies this table.
 function PublicAPI.new(pluginPages, menuRouter)
     return {
+        SanitizeString = function(text)
+            if type(text) ~= "string" then return nil, "invalid", "text must be a string" end
+            -- Strip tags first, then brackets so malformed or nested input cannot leave markup.
+            local sanitized = text:gsub("<[^<>]*>", ""):gsub("[<>]", "")
+            return sanitized
+        end,
         Register = function(registration)
             local extension, reason, detail = pluginPages:RegisterOwner(registration)
             if extension == nil then return nil, reason, detail end

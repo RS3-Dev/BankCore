@@ -16,6 +16,7 @@ local BankSession = {}
 BankSession.__index = BankSession
 
 local BANK_ATTACH_RETRY_EVENT = Config.CORE_REF .. "_layout_retry"
+local BANK_ATTACH_DRAW_EVENT = Config.CORE_REF .. "_attachment_timing"
 local BANK_ITEMS_SETTLE_EVENT = Config.CORE_REF .. "_filter_settle"
 local BANK_ITEMS_SETTLE_TICKS = 128
 local BANK_READY_TICKS_REQUIRED = 8
@@ -33,7 +34,16 @@ local function shouldCheckBankItems(tick)
 end
 
 local function bankIsOpen()
-    return ui.Interfaces:GetComponent(id.Component.TOPLEVEL_V2__BANK_WINDOW) ~= nil
+    if ui.Interfaces:GetComponent(id.Component.TOPLEVEL_V2__BANK_WINDOW) == nil then
+        return false, "bank host missing"
+    end
+    -- Inspect the bank itself; other loaded dialogs can retain stale visibility flags.
+    local content = ui.Interfaces:GetComponent(id.Component.BANK__CONTENT)
+    if content == nil then return false, "bank content missing" end
+    if content.hidden == true or content.visible ~= true or content.visibleGlobal ~= true then
+        return false, "bank content not visible"
+    end
+    return true
 end
 
 local function isBankInventoryEvent(event)
@@ -42,10 +52,12 @@ end
 
 -- Check the control's parents too.
 local function belongsToBank(component)
+    local bank = ui.Interfaces:GetComponent(id.Component.BANK__ALL)
+    if bank == nil then return false end
     local current = component
     local depth = 0
     while current ~= nil and depth < 32 do
-        if current.interfaceID == Config.BANK_INTERFACE_ID then return true end
+        if current.interfaceID == bank.interfaceID then return true end
         current = current.parent
         depth = depth + 1
     end
@@ -105,6 +117,7 @@ function BankSession.new(options)
         menuRouter = nil,
         layoutRetryTicks = 0,
         layoutReadyTicks = 0,
+        attachmentWanted = false,
         filterSettleTicks = 0,
         inGame = Player.IsAvailable(),
         shutDown = false,
@@ -132,8 +145,9 @@ function BankSession.new(options)
     return session
 end
 
-function BankSession:StopLayoutRetry()
+function BankSession:StopLayoutRetry(keepDrawTiming)
     Event.Logic.Unsubscribe(BANK_ATTACH_RETRY_EVENT)
+    if not keepDrawTiming then Event.Draw.Unsubscribe(BANK_ATTACH_DRAW_EVENT) end
     self.layoutRetryTicks = 0
     self.layoutReadyTicks = 0
 end
@@ -166,31 +180,99 @@ function BankSession:BeginFilterSettle()
     end)
 end
 
--- Wait for several ready checks before adding controls.
+-- Wait for eight consecutive ready checks before adding controls.
 function BankSession:BeginLayoutRetry()
-    if not self.inGame then return end
+    if not self.inGame or self.shutDown then return end
+    self.attachmentWanted = true
+    -- Inventory, variable and visibility events can describe the same transition.
+    if self.layout.active or self.layoutRetryTicks > 0 then return end
+    debugLog("attachment requested; inGame=", self.inGame,
+        "; active=", self.layout.active, "; bank component=", id.Component.BANK__ALL)
     self:StopLayoutRetry()
     self.layoutRetryTicks = BANK_ATTACH_RETRY_TICKS
+    local lastReason
+    local checkedTicks, firstReadyTick, stableSince = 0, nil, nil
+    local built, drawSeconds = false, 0
+    if DebugLog.IsEnabled() then
+        -- The next draw is a paint opportunity, not a measurement of GPU completion.
+        Event.Draw.Subscribe(BANK_ATTACH_DRAW_EVENT, function(event)
+            drawSeconds = drawSeconds + event.timeDeltaSecs
+            if not built then return end
+            Event.Draw.Unsubscribe(BANK_ATTACH_DRAW_EVENT)
+            debugLog("[Bank Core timing] request-to-next-draw approximately ",
+                math.floor(drawSeconds * 1000 + 0.5), "ms; first ready tick=", firstReadyTick,
+                "; final ready run began at tick=", stableSince, "; apply tick=", checkedTicks,
+                "; required ready ticks=", BANK_READY_TICKS_REQUIRED)
+        end)
+    end
     Event.Logic.Subscribe(BANK_ATTACH_RETRY_EVENT, function()
+        checkedTicks = checkedTicks + 1
         if not self.inGame then
             self:StopLayoutRetry()
             return
         end
-        if not bankIsOpen() then
-            self.layoutReadyTicks = 0
-        elseif self.layout:IsReady() then
-            self.layoutReadyTicks = self.layoutReadyTicks + 1
-        else
-            self.layoutReadyTicks = 0
-        end
-        if self.layoutReadyTicks >= BANK_READY_TICKS_REQUIRED
-            and self.layout:Apply() then
+        local openOK, open, reason = pcall(bankIsOpen)
+        if not openOK then
+            debugLog("bank detection ERROR: ", tostring(open))
+            self.attachmentWanted = false
             self:StopLayoutRetry()
             return
         end
+        local ready = false
+        if open then
+            local readyOK
+            readyOK, ready, reason = pcall(function() return self.layout:IsReady() end)
+            if not readyOK then
+                debugLog("readiness ERROR: ", tostring(ready))
+                self.attachmentWanted = false
+                self:StopLayoutRetry()
+                return
+            end
+        end
+        reason = ready and "ready" or reason or "not ready"
+        if reason ~= lastReason then
+            debugLog("attachment check: ", reason)
+            lastReason = reason
+        end
+        if ready then
+            firstReadyTick = firstReadyTick or checkedTicks
+            stableSince = stableSince or checkedTicks
+            self.layoutReadyTicks = self.layoutReadyTicks + 1
+        else
+            stableSince = nil
+            self.layoutReadyTicks = 0
+        end
+        if self.layoutReadyTicks >= BANK_READY_TICKS_REQUIRED then
+            debugLog("bank ready; applying layout")
+            local ok, applied = pcall(function() return self.layout:Apply() end)
+            if not ok then
+                debugLog("layout application ERROR: ", tostring(applied))
+                self.attachmentWanted = false
+            end
+            if applied or not ok then
+                built = ok and applied == true
+                debugLog("attachment finished; success=", ok and applied == true)
+                self:StopLayoutRetry(built)
+                return
+            end
+        end
         self.layoutRetryTicks = self.layoutRetryTicks - 1
-        if self.layoutRetryTicks <= 0 then self:StopLayoutRetry() end
+        if self.layoutRetryTicks <= 0 then
+            debugLog("attachment timed out; last check=", lastReason)
+            self:StopLayoutRetry()
+        end
     end)
+end
+
+-- A visible bank can finish measuring after the bounded attachment attempt expires.
+function BankSession:RetryLayoutWhenReady()
+    if not self.inGame or self.shutDown or not self.attachmentWanted
+        or self.layout.active or self.layoutRetryTicks > 0 then return end
+    local ok, ready = pcall(function() return self.layout:IsReady() end)
+    if ok and ready then
+        debugLog("bank geometry became ready after waiting; retrying attachment")
+        self:BeginLayoutRetry()
+    end
 end
 
 function BankSession:SavePreference(key, value)
@@ -240,6 +322,7 @@ function BankSession:DestroyPanel()
 end
 
 function BankSession:SuspendGameUI()
+    self.attachmentWanted = false
     self.inGame = false
     self:StopLayoutRetry()
     self:StopFilterSettle()
@@ -256,6 +339,7 @@ function BankSession:ResumeGameUI()
 end
 
 function BankSession:CloseBank()
+    self.attachmentWanted = false
     self:StopLayoutRetry()
     self:StopFilterSettle()
     self.pluginPages:BankClosed("closed")

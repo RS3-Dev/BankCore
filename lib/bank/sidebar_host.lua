@@ -86,7 +86,8 @@ function SidebarHost:RefreshTabMount(tab)
 end
 
 function SidebarHost:TabMountBounds()
-    return { x = 1, y = 1, width = Config.SIDEBAR_COLUMN_WIDTH - 10, height = self.sidebarHeight - 2 }
+    return { x = 1, y = 1, width = Config.SIDEBAR_COLUMN_WIDTH - 10,
+        height = math.max(0, SidebarFrame.ContentHeight(self.sidebarHeight) - 2) }
 end
 
 -- Show the selected content or explain why it is unavailable.
@@ -123,11 +124,20 @@ function SidebarHost:CreateSidebar(parent, height)
     SidebarFrame.Create(self, parent, height, RAIL_X, RAIL_Y, {
         onSelect = function(tabID) self:SetSidebarMode(tabID) end,
         onReorder = function(tabIDs, movedID) self:ReorderSidebarTabs(tabIDs, movedID) end,
+        onReturn = function() self:ReturnToBank() end,
     })
     self.emptyLabel = createEmptyLabel(self.rail)
     self:UpdateLayoutControls()
     self:RefreshSidebar()
     SidebarFrame.RaiseEdges(self)
+end
+
+-- Close whichever plugin owns the displayed page or custom view.
+function SidebarHost:ReturnToBank()
+    if not self.active or self.shownPage == nil or self.pageTransitions > 0 then return false end
+    local ok, closed = pcall(function() return self:ShowPage(nil) end)
+    if not ok then debugLog("Bank Core could not return to the native bank: ", tostring(closed)) end
+    return ok and closed == true
 end
 
 -- Resize the sidebar and its plugin content.
@@ -147,12 +157,17 @@ end
 
 -- Remove the sidebar and its contents.
 function SidebarHost:DestroySidebar()
-    self:CloseTabMount()
+    local closed, closeError = pcall(function() self:CloseTabMount() end)
     self.emptyLabel = nil
-    SidebarFrame.Destroy(self)
+    local destroyed, destroyError = pcall(SidebarFrame.Destroy, self)
+    if not closed then error(closeError, 0) end
+    if not destroyed then error(destroyError, 0) end
 end
 
 function SidebarHost:UpdateLayoutControls()
+    if self.returnToBankButton ~= nil then
+        self.returnToBankButton:SetDisabled(self.shownPage == nil)
+    end
     if self.tabRail == nil then return end
     self.tabRail:SetTabs(self.extensionTabs, self.sidebarMode)
 end

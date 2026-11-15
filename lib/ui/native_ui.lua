@@ -2,7 +2,7 @@
 
 local NativeUi = {}
 
-NativeUi.PANEL_BACKGROUND_SPRITE = 8082
+NativeUi.PANEL_BACKGROUND_SPRITE = id.Sprite.OLD_BACKGROUND_TEXTURE
 NativeUi.SCROLLBAR_WIDTH = 16
 
 local SCROLLBAR_WIDTH = NativeUi.SCROLLBAR_WIDTH
@@ -11,12 +11,12 @@ local THUMB_WIDTH = 12
 local THUMB_X = (SCROLLBAR_WIDTH - THUMB_WIDTH) // 2
 local THUMB_CAP_HEIGHT = 6
 local MIN_THUMB_HEIGHT = 18
-local UP_SPRITE = 18436
-local DOWN_SPRITE = 18437
-local TRACK_SPRITE = 792
-local THUMB_TOP_SPRITE = 18423
-local THUMB_BOTTOM_SPRITE = 18424
-local THUMB_MIDDLE_SPRITE = 18425
+local UP_SPRITE = id.Sprite.SCROLLBAR_V2_2
+local DOWN_SPRITE = id.Sprite.SCROLLBAR_V2_3
+local TRACK_SPRITE = id.Sprite.SCROLLBAR_DRAGGER_V2_3
+local THUMB_TOP_SPRITE = id.Sprite.RS3_CHILD_SCROLL_BAR_VERTICAL_DRAGGER_TOP
+local THUMB_BOTTOM_SPRITE = id.Sprite.RS3_CHILD_SCROLL_BAR_VERTICAL_DRAGGER_BOTTOM
+local THUMB_MIDDLE_SPRITE = id.Sprite.RS3_CHILD_SCROLL_BAR_VERTICAL_DRAGGER_TILE
 -- Draw decorations above clickable areas, with arrows on top.
 local PART_ORDER = { "track", "trackSprite", "thumb", "thumbTop", "thumbMiddle", "thumbBottom",
     "upArrow", "downArrow" }
@@ -111,9 +111,9 @@ function Scrollbar:ScrollFromTrack(trackY, contentHeight)
     return math.max(0, math.min(travel, thumbY)) / travel * maxScrollY
 end
 
--- Hide controls when content fits; keep the bank's scrollbar covered.
-function Scrollbar:Refresh(contentHeight, scrollY)
-    local hidden = contentHeight <= self.height
+-- Custom views can hide the controls when content fits; the default stays visible.
+function Scrollbar:Refresh(contentHeight, scrollY, alwaysShow)
+    local hidden = alwaysShow == false and contentHeight <= self.height
     local trackHeight = self:TrackHeight()
     local thumbHeight = self:ThumbHeight(contentHeight)
     local thumbY = ARROW_HEIGHT + thumbOffset(self, contentHeight, scrollY)

@@ -26,6 +26,8 @@ function BankView.new(options)
         expanded = false,
         -- Window changes to undo later.
         expansion = nil,
+        -- Distinguish a completed expansion from a resize that failed midway.
+        expansionRecord = nil,
         windowRecord = options.windowRecord or BankWindowRecord.new(),
         components = {},
         -- The plugin page, or nil for the normal bank.
@@ -91,12 +93,18 @@ end
 
 -- Close the displayed page, then remove the sidebar.
 function BankView:DestroyRail()
-    self.itemHover:RemovePageInput()
-    self.itemHover:RestoreBankItemPositions()
-    self.itemHover:CancelMissingStackRetry()
-    revokeCustomView(self)
-    self.pageDisplay:DestroyRuntimeSprites()
-    self:DestroySidebar()
+    local failure
+    local function cleanup(action)
+        local ok, message = pcall(action)
+        if not ok then failure = failure or message end
+    end
+    cleanup(function() self.itemHover:RemovePageInput() end)
+    cleanup(function() self.itemHover:RestoreBankItemPositions() end)
+    cleanup(function() self.itemHover:CancelMissingStackRetry() end)
+    cleanup(function() revokeCustomView(self) end)
+    cleanup(function() self.pageDisplay:DestroyRuntimeSprites() end)
+    cleanup(function() self:DestroySidebar() end)
+    if failure ~= nil then error(failure, 0) end
 end
 
 -- Keep click areas aligned as custom items move or hide.

@@ -1,12 +1,12 @@
 {
-  "name": "bankcore",
-  "version": "1.1.1",
-  "description": "Bank Utilities Core: shared bank layout, pages, sidebar tabs, and native item interactions.",
+  "name": "Bank Core",
+  "version": "1.1.2",
   "hasRibbonIcon": false,
   "hasSettingsIcon": true,
-  "dependencies": {
-    "prettyui": 6398181
-  },
   "requiredPermissions": [],
-  "optionalPermissions": []
+  "optionalPermissions": [],
+  "contactEmailAddress": "plugins@rs3.dev",
+  "requiredDependencies": {
+    "prettyui": 6398181
+  }
 }

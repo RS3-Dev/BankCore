@@ -1,6 +1,6 @@
 # Bank Core API
 
-This reference describes the API shipped with Core 1.1.0. Dependent plugins use
+This reference describes the API shipped with Core 1.1.2. Dependent plugins use
 the API returned by `bankcore`; Core's Lua modules are private to its runtime.
 The [examples](../examples/README.md) show complete, independently loaded plugins.
 
@@ -64,10 +64,38 @@ plugin does not open the page. If an injected API has already stopped during a
 reload, registration returns `stopped`; the complete examples also try the
 shared API in that case.
 
+## Sanitize player text
+
+`bankcore.SanitizeString(text)` returns a string with all `<...>` tags removed,
+including image, sprite and formatting tags. It also removes any remaining
+`<` and `>` characters, including unmatched brackets. Other text, whitespace
+and Unicode are preserved. Non-string input returns `nil, "invalid", detail`.
+The result can be empty; apply your own required-field and length checks.
+
+```lua
+local name, reason, detail = bankcore.SanitizeString(imported.name)
+if name == nil then return false, reason, detail end
+-- Validate name, then save this sanitized value to your plugin's persistentDB.
+saved.name = name
+
+-- Sanitize on display too, including data saved before this protection existed.
+label.content = bankcore.SanitizeString(saved.name) or ""
+-- "Supplies<img=-1><sprite=999999999>" becomes "Supplies".
+```
+
+Invalid inline image or sprite IDs can crash the client when rendered. Saving
+such text can make the crash recur whenever the stored value is displayed.
+Use this helper on imported and manually entered strings before saving them,
+and on existing stored strings before passing them to text controls, tooltips
+or menus. Sanitize the final combined text if you assemble it from several parts.
+Core does not rewrite another plugin's persistentDB or sanitize controls that
+plugin draws itself. This is a game-text helper, not an HTML sanitizer.
+It is available without registering an extension.
+
 ## Register an extension
 
 `bankcore.Register(spec)` returns an extension handle, or `nil, reason, detail`.
-The root API provides only `Register`. The handle provides `SetPage`, `Refresh`,
+The root API provides `Register` and `SanitizeString`. The handle provides `SetPage`, `Refresh`,
 `Open`, `Close`, `IsOpen`, `GetBankItems`, `GetBankBounds`, `GetBankState`, `GetMenuItem` and
 `Dispose`. Both are plain tables of functions, suitable for the client's copied
 dependency exports; they expose no session or real bank component.
@@ -100,6 +128,9 @@ local ext, reason, detail = bankcore.Register({
   `resize` and `unmount` are optional.
 - `customView`: optional function that draws the extension's own view instead of
   a page; see [Draw a custom view](#draw-a-custom-view).
+- `alwaysShowScrollbar`: optional boolean for `customView` registrations only,
+  default `true`. Set it to `false` to hide the scrollbar when the custom content
+  fits. Overflowing content always shows it. Standard item pages always show it.
 - `allowNativeDrag`: optional boolean, default `false`. Sets the drag behavior
   for the extension's pages and custom view. A `SetPage` description can override
   it with an explicit `true` or `false` for that page.
@@ -153,6 +184,16 @@ the rail on the next logic tick, after `Register` returns.
 `parent`, which clips them to the sidebar column. Use the window-sized,
 click-through `overlay` for tooltips or popups that must extend outside it.
 Plugins receive these rendering layers, not the bank's own components.
+
+Core reserves the row above the plugin column for **Return to Bank**, aligned
+with the native bank tabs. The plugin column starts below that row; `ctx.height`
+already excludes its 36 interface units. Use the supplied dimensions when
+laying out controls. The icon rail keeps its existing top position.
+
+Return to Bank closes the displayed plugin page or custom view through Core's
+normal page-close path, leaving the selected sidebar column in place. The
+button is disabled while the native bank is displayed. Plugins do not need to
+provide their own return control.
 
 When the column size changes, Core updates the context and calls `resize(ctx)`.
 Without `resize`, Core calls `unmount()` and mounts again. Keep search text and
@@ -364,6 +405,20 @@ Registering with `customView` prepares the view, so it needs no `SetPage`, and
 The rail icon opens the view, or selects the extension's column if it has one,
 and `ext:Open()`, `ext:Close()` and `ext:IsOpen()` work as they do for pages.
 Only one page or view shows at a time.
+
+Custom views can opt into hiding the scrollbar when it is unnecessary:
+
+```lua
+local ext = bankcore.Register({
+    id = "example.wanted", name = "Wanted", icon = "STAR",
+    customView = drawView,
+    alwaysShowScrollbar = false,
+})
+```
+
+Omitting `alwaysShowScrollbar` keeps it visible, including for short content.
+The option hides the controls without changing the view's width or reserved
+scrollbar space. Register again to change it.
 
 ### The view
 

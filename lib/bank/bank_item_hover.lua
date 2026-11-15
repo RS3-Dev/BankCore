@@ -12,7 +12,7 @@ local interfaceMousePosition = UICoordinates.interfaceMousePosition
 local BankItemHover = {}
 BankItemHover.__index = BankItemHover
 
-local BANK_ITEMS_STATIC_ID = BankInterface.ITEMS
+local BANK_ITEMS_COMPONENT_ID = BankInterface.ITEMS
 local GRID_SLOT_SIZE = BankGrid.SLOT_SIZE
 local OFFSCREEN_POSITION = -10000
 -- Prevent clicks from accidentally rearranging the bank.
@@ -102,7 +102,7 @@ function BankItemHover:FindNativeItem(
     if recordedStack ~= nil and BankItemIndex.ObjectID(recordedStack.component) == objectID then
         return recordedStack.component, nativeSlotKey
     end
-    local bankItemLayer = component(BANK_ITEMS_STATIC_ID)
+    local bankItemLayer = component(BANK_ITEMS_COMPONENT_ID)
     if bankItemLayer == nil then return nil end
     local firstMatchingStack = nil
     local firstMatchingSlotKey = nil
@@ -344,7 +344,7 @@ end
 function BankItemHover:RecordBankItemPositions(bankItems)
     if self.bankView.shownPage == nil then return end
     if bankItems == nil then
-        local bankItemLayer = component(BANK_ITEMS_STATIC_ID)
+        local bankItemLayer = component(BANK_ITEMS_COMPONENT_ID)
         if bankItemLayer == nil then return end
         bankItems = BankItemIndex.Read(bankItemLayer)
     end
@@ -511,7 +511,7 @@ function BankItemHover:RefreshAfterBankRebuild(refreshShownPage)
             return
         end
         -- Reuse this bank read for both checks.
-        local bankItemLayer = component(BANK_ITEMS_STATIC_ID)
+        local bankItemLayer = component(BANK_ITEMS_COMPONENT_ID)
         local bankItems = bankItemLayer ~= nil and BankItemIndex.Read(bankItemLayer) or nil
         self:RecordBankItemPositions(bankItems)
         if self.bankView.pageDisplay.scrollInteractionTicks > 0 then

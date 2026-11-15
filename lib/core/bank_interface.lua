@@ -1,19 +1,17 @@
--- Find parts of the game's bank window by their fixed IDs.
-
-local Config = require("lib/core/config")
+-- Find bank components directly by their named component IDs.
 
 local BankInterface = {}
 
-BankInterface.ITEMS = 201
-BankInterface.ITEMS_CONTAINER = 199
+BankInterface.ITEMS = id.Component.BANK__BANK_INV
+BankInterface.ITEMS_CONTAINER = id.Component.BANK__BANK_ITEMS_CONTAINER
 
-function BankInterface.Get(staticID)
-    return ui.Interfaces:GetComponent(Config.BANK_INTERFACE_ID, staticID)
+function BankInterface.Get(componentID)
+    return ui.Interfaces:GetComponent(componentID)
 end
 
 -- Missing or unreadable controls return nil.
-function BankInterface.Find(staticID)
-    local ok, value = pcall(BankInterface.Get, staticID)
+function BankInterface.Find(componentID)
+    local ok, value = pcall(BankInterface.Get, componentID)
     return ok and value or nil
 end
 

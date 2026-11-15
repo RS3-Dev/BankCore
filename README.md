@@ -11,8 +11,8 @@ Enable **PrettyUI**, **Bank Core**, and the bank feature plugins you want in you
 client's plugin manager. Core by itself provides no tags, categories or searches.
 
 For a manual installation, create a `bankcore` folder in your client's development
-plugins directory. Copy `main.lua`, `plugin.json`, `LICENSE` and `lib/` from this
-repository into it, or extract the `bankcore` folder from a runtime release ZIP:
+plugins directory. Copy `main.lua`, `plugin.json` and `lib/` from this
+repository into it, or extract the contents of a runtime release ZIP into it:
 
 ```text
 plugins/
@@ -32,6 +32,10 @@ for reference and do not need to go in your Core plugin folder.
 3. Choose a tag, category or search result in that plugin's sidebar.
 4. Use the displayed items with the bank's normal clicks and menus.
 5. Click a native bank tab to return to the normal bank view.
+
+The **Return to Bank** button above the sidebar also closes any plugin page or
+custom view. It is disabled while the normal bank is displayed, and returning
+keeps the selected plugin's sidebar open.
 
 A plugin with no sidebar column can open its page directly from its rail icon.
 Drag an icon up or down the rail to change the order; Core remembers it, and
@@ -68,7 +72,7 @@ The mod.io implementation of Bank Core has ID **6464293**. To depend on it, add
 this entry to your plugin manifest:
 
 ```json
-"dependencies": {
+"requiredDependencies": {
   "bankcore": 6464293
 }
 ```
@@ -78,6 +82,11 @@ All Items selection, search, filters and presets. Search and filters use the
 shared cancel label's English text to distinguish their modes. The API also
 supports optional page titles, native drag settings, sidebar sprites and native
 bank-tab/slot reads. See the API reference for field formats and callbacks.
+
+Use [`bankcore.SanitizeString(text)`](docs/API.md#sanitize-player-text) before
+saving or displaying player text from sharecodes or manual entry. It strips
+game text tags, including inline images and sprites that can crash the client
+when their IDs are invalid. Sanitize existing stored text on display as well.
 
 - [API reference](docs/API.md): register a sidebar, supply an item page or draw a custom
   view, and read menus.
@@ -92,3 +101,10 @@ appearance in RuneScape when changing those parts.
 Copyright (C) 2026 Bank Core contributors. Core and its examples are licensed
 under the [BSD 2-Clause License](LICENSE)
 (`BSD-2-Clause`). Include the license when redistributing them.
+
+## Runtime releases
+
+Download a runtime ZIP from [GitHub Releases](https://github.com/RS3-Dev/bank-utils-core/releases).
+Each ZIP contains `main.lua`, `plugin.json` and `lib/` at its root and is ready
+to install without a build step. The BSD license is embedded in `main.lua`;
+repository docs, examples and the standalone license file are excluded.
