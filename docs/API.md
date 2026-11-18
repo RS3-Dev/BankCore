@@ -19,11 +19,27 @@ take over the bank from another plugin.
 
 ## Connect to Core
 
-Declare `bankcore` under `optionalDependencies` and read the injected `bankcore`
-global. The shared `_G.__bankcore_api` is also available in the client's shared
-Lua state. On `PluginDependencyUpdate(event)`, check `event.pluginIdentifier`:
-register again when `event.enabled` is true, and dispose the extension when it
-is false. Dispose it from `PluginShutdown()` as well.
+Declare `bankcore` under `requiredDependencies` if your plugin needs Core to
+function, and read the injected `bankcore` global. Use `optionalDependencies`
+only when the plugin can work without Core. Optional dependencies can also use
+`PluginDependencyUpdate(event)` to connect or disconnect when their availability
+changes. Dispose your extension from your plugin's `PluginShutdown()`.
+
+Core retains registrations and prepared pages across its own session reloads
+while the registering plugins remain running.
+Existing API exports and extension handles use the current session. Sidebar
+icons and controls return, but previously displayed pages do not reopen
+automatically. While Core is suspended, `Open()` returns `bank_closed`, bank
+state reports a closed bank, and registration returns `busy`. A disposed or
+replaced handle remains stale across reloads. This recovery does not depend on
+optional-dependency notifications. Plugins must still dispose their handles
+when they unload so Core does not retain callbacks to an unloaded plugin.
+
+The client's `prl bankcore` command disables and re-enables Core. If that also
+disables required dependents, their shutdown functions dispose their registrations.
+Core must honor those disposals and cannot re-enable the disabled plugins.
+Use `plist` to check their state and `pon <plugin folder>` to enable them again.
+Keeping Core as a required dependency is correct for plugins that need it.
 
 For local development the dependency value is the string `"bankcore"`.
 Before publishing, replace that string in your manifest with Core's numeric
@@ -60,9 +76,9 @@ connect()
 ```
 
 This example prepares a page. Clicking its rail icon opens it; loading the
-plugin does not open the page. If an injected API has already stopped during a
-reload, registration returns `stopped`; the complete examples also try the
-shared API in that case.
+plugin does not open the page. The callback in this example is for plugins that
+choose an optional dependency; required dependents do not need it for Core's
+session reload recovery.
 
 ## Sanitize player text
 
@@ -138,8 +154,8 @@ local ext, reason, detail = bankcore.Register({
   described below.
 
 Extra fields and incorrect types are refused. Registration returns `invalid`
-with a detail for bad input, `stopped` after Core shuts down, or `busy` when
-called inside a sidebar callback.
+with a detail for bad input, `stopped` after permanent registry disposal, or
+`busy` while Core is suspended or when called inside a sidebar callback.
 
 Registering an ID again disposes its previous extension. Its old handle becomes
 stale and its queued callbacks are discarded. `ext:Dispose()` removes its icon,
@@ -147,6 +163,12 @@ column and displayed page and is safe to repeat. After disposal or replacement,
 actions return `false, "stale"`, `IsOpen()` returns false and reads return nil.
 
 ## Sidebar icons and columns
+
+A rail icon for a plugin without a sidebar column opens its prepared page and
+is highlighted while selected. It keeps the bank at rail-only width; clicking
+the selected icon again closes its page. A refused opening keeps the previous
+selection. Core's Settings cog follows the same rail-only behavior and clears
+the selected plugin column when opened.
 
 Pass a game sprite ID directly to use a sprite outside PrettyUI's icon list:
 
@@ -314,6 +336,10 @@ A refusal returns `false, reason` without replacing the displayed page:
 - `busy`: a page change or sidebar callback is running.
 - `preset_open`: the preset selector is open.
 - `not_all_items`: the native All Items tab is not selected.
+
+The current tab control takes precedence over the last tab-selection event,
+including for `GetBankState().viewAll`. If the control cannot be read, Core uses
+the last known selection.
 
 If drawing begins and fails, `Open` returns `false, "failed"` and Core restores
 the native view. Core displays no refusal notice; the plugin explains the
@@ -581,7 +607,8 @@ plugins' callbacks.
 ### Native bank state
 
 `ext:GetBankState()` returns a fresh table, or `nil, "stale"` after disposal,
-replacement or Core shutdown. Register without an icon or page to observe only.
+or replacement. While Core is suspended, it reports a closed bank instead.
+Register without an icon or page to observe only.
 
 - `bankOpen`: Core has attached to the open bank. False while closed, unavailable
   or still attaching.
@@ -621,7 +648,8 @@ local state = ext:GetBankState()
 
 Disposed or replaced extensions receive no later callbacks. During Core
 shutdown there is no later tick: page-close and bank-close callbacks run
-immediately where applicable, after the API has stopped.
+immediately where applicable, after Core has suspended bank access. Registrations
+remain available for the next Core session unless their plugins dispose them.
 
 ## Item menus and completed drops
 

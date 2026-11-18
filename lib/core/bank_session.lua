@@ -123,19 +123,34 @@ function BankSession.new(options)
         shutDown = false,
     }, BankSession)
     session.layout = BankView.new({
+        collapseSidebar = session.preferences.collapseSidebar,
         windowRecord = options.windowRecord or BankWindowRecord.load(),
         readRailOrder = function() return session.preferences.railOrder end,
         saveRailOrder = function(railOrder) return session:SavePreference("railOrder", railOrder) end,
     })
-    session.pluginPages = PluginPages.new(session.layout, {
+    local pageOptions = {
         isInGame = function() return session.inGame end,
         bankIsOpen = bankIsOpen,
-    })
+    }
+    if options.pluginPages ~= nil then
+        session.pluginPages = PluginPages.Attach(options.pluginPages, session.layout, pageOptions)
+    else
+        session.pluginPages = PluginPages.new(session.layout, pageOptions)
+    end
     session.menuRouter = MiniMenuRouter.new(session, {
         bankIsOpen = bankIsOpen,
         bankItemFromMenu = bankItemFromMenu,
     })
     session.publicAPI = PublicAPI.new(session.pluginPages, session.menuRouter)
+    session.layout.settingsPage = {
+        owner = { id = "bankcore.settings" }, key = "settings", title = "Bank Core settings",
+        alwaysShowScrollbar = false,
+        draw = function(view)
+            session:CreateContentLayer(view.parent, view.width, view.height, session.layout.pageDisplay.layer)
+            return true, session.panel.contentHeight or CorePanel.CONTENT_HEIGHT
+        end,
+    }
+    session.layout.closeSettings = function() session:DestroyPanel() end
     session.lifecycle = Lifecycle.new(session, {
         bankIsOpen = bankIsOpen,
         isBankInventoryEvent = isBankInventoryEvent,
@@ -292,6 +307,14 @@ function BankSession:SetDebugPreference(enabled)
     return true
 end
 
+-- Save before changing the sidebar so a failed write leaves the layout alone.
+function BankSession:SetCollapseSidebarPreference(enabled)
+    local saved, reason = self:SavePreference("collapseSidebar", enabled == true)
+    if not saved then return false, reason end
+    self.layout:SetCollapseSidebar(enabled)
+    return true
+end
+
 -- Undo window changes before forgetting them; reconnect on the next bank opening.
 function BankSession:ResetGeometry()
     if self.shutDown then return false, "Bank Core is not running." end
@@ -306,12 +329,16 @@ function BankSession:ResetGeometry()
     return true
 end
 
-function BankSession:CreateContentLayer(parent)
+function BankSession:CreateContentLayer(parent, width, height, closeParent)
     if self.shutDown then return end
     self:DestroyPanel()
     self.panel = CorePanel.new(parent, {
         preferences = self.preferences,
+        width = width, height = height,
+        closeParent = closeParent,
+        onClose = function() return self.layout:ReturnToBank() end,
         onChangeDebug = function(enabled) return self:SetDebugPreference(enabled) end,
+        onChangeCollapseSidebar = function(enabled) return self:SetCollapseSidebarPreference(enabled) end,
         onResetGeometry = function() return self:ResetGeometry() end,
     })
 end
@@ -360,7 +387,7 @@ function BankSession:Shutdown()
         if not ok then debugLog("Bank Core shutdown could not close ", label, ": ", message) end
     end
     -- Let the page clean up before removing its bank view.
-    close("extension pages", function() self.pluginPages:Close() end)
+    close("extension pages", function() self.pluginPages:Suspend() end)
     self.lifecycle:Shutdown()
 end
 
