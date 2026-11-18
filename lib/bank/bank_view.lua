@@ -35,6 +35,7 @@ function BankView.new(options)
         -- The current custom drawing.
         customView = nil,
         sidebarMode = nil,
+        collapseSidebar = options.collapseSidebar == true,
         -- Plugin tabs in the player's saved order.
         extensionTabs = {},
         -- The session supplies functions to load and save tab order.
@@ -61,9 +62,10 @@ function BankView:Changed(itemsChanged)
     self.onChange()
 end
 
--- Keep the sidebar plugin's popups above the page and sidebar.
+-- Keep sidebar popups and Core's tooltips above the page and its input layers.
 function BankView:RaiseMountOverlays()
     if self.tabMount ~= nil then self.tabMount:RaiseOverlay() end
+    if self.sidebarTooltipOverlay ~= nil then self.sidebarTooltipOverlay:MoveToFront() end
 end
 
 function BankView:MountAtPointer()
@@ -143,6 +145,7 @@ local function drawCustomView(self)
     local view = CustomView.new(parent, overlay, pageArea.width, pageArea.height, pageDisplay.scrollY, {
         geometry = function() return pageDisplay:ViewGeometry() end,
         release = function(binding) self.itemHover:ReleaseBinding(binding) end,
+        revoke = page == self.settingsPage and self.closeSettings or nil,
     })
     self.customView = view
     local drawn, height = page.draw(view.context)
@@ -185,11 +188,7 @@ local function showPage(self, page)
         debugLog("Bank Core pages are unavailable while the preset selector is open")
         return false
     end
-    if page ~= nil and not self.nativeViewAll then
-        local detected = self:DetectNativeViewAll()
-        if detected ~= nil then self.nativeViewAll = detected end
-    end
-    if page ~= nil and not self.nativeViewAll then
+    if page ~= nil and page ~= self.settingsPage and not self:IsNativeViewAll() then
         debugLog("Bank Core pages require the native View All bank tab")
         return false
     end
