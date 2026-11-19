@@ -9,6 +9,7 @@ local SidebarHost = {}
 local RAIL_X = 12
 local RAIL_Y = 44
 local MESSAGE_INSET = 8
+local SETTINGS_MODE = "__bankcore_settings"
 
 -- Use saved tab order, with new tabs at the end.
 local function sortByRailOrder(tabs, railOrder)
@@ -100,7 +101,7 @@ function SidebarHost:RefreshSidebar()
     end
     self:RefreshTabMount(tab)
     if tab == nil then
-        self.emptyLabel.content = "No bank plugins found."
+        self.emptyLabel.content = #self.extensionTabs == 0 and "No bank plugins found." or "Select a bank plugin."
     else
         self.emptyLabel.content = "This tab could not be shown."
     end
@@ -130,11 +131,27 @@ function SidebarHost:CreateSidebar(parent, height)
         onSelect = function(tabID) self:SetSidebarMode(tabID) end,
         onReorder = function(tabIDs, movedID) self:ReorderSidebarTabs(tabIDs, movedID) end,
         onReturn = function() self:ReturnToBank() end,
+        onSettings = function() self:ToggleSettings() end,
     })
     self.emptyLabel = createEmptyLabel(self.rail)
     self:UpdateLayoutControls()
     self:RefreshSidebar()
     SidebarFrame.RaiseEdges(self)
+end
+
+-- Open Core's own page without adding an entry to the plugin registry.
+function SidebarHost:ToggleSettings()
+    if not self.active or self.pageTransitions > 0 or self.settingsPage == nil then return false end
+    if self.shownPage == self.settingsPage then return self:ReturnToBank() end
+    local ok, shown = pcall(function() return self:ShowPage(self.settingsPage) end)
+    if not ok then debugLog("Bank Core could not open settings: ", tostring(shown)) end
+    if ok and shown == true then
+        self.sidebarMode = SETTINGS_MODE
+        self:RefreshSidebar()
+        self:UpdateLayoutControls()
+        self:Changed(false)
+    end
+    return ok and shown == true
 end
 
 -- Close whichever plugin owns the displayed page or custom view.
@@ -170,6 +187,22 @@ function SidebarHost:DestroySidebar()
 end
 
 function SidebarHost:UpdateLayoutControls()
+    if self.sidebarMode == SETTINGS_MODE and self.shownPage ~= self.settingsPage then self.sidebarMode = nil end
+    local selected = self:FindSidebarTab(self.sidebarMode)
+    if selected ~= nil and selected.mount == nil
+        and (self.shownPage == nil or self.shownPage.owner.id ~= selected.extensionID) then
+        self.sidebarMode = nil
+    end
+    if self.active and self.expanded then self:UpdateSidebarExpansion() end
+    SidebarFrame.SetCollapsed(self, self:IsSidebarCollapsed())
+    if self.settingsButton ~= nil then
+        self.settingsButton.active = self.settingsPage ~= nil and self.shownPage == self.settingsPage
+        self.settingsButton:_UpdateState()
+        if self.settingsSelectionFrame ~= nil then
+            self.settingsSelectionFrame.hidden = not self.settingsButton.active
+            self.settingsSelectionFrame:MoveToFront()
+        end
+    end
     if self.returnToBankButton ~= nil then
         self.returnToBankButton:SetDisabled(self.shownPage == nil)
     end
@@ -177,14 +210,46 @@ function SidebarHost:UpdateLayoutControls()
     self.tabRail:SetTabs(self.extensionTabs, self.sidebarMode)
 end
 
+-- Settings and plugins without sidebar content only need the icon rail.
+function SidebarHost:IsSidebarCollapsed()
+    if self.sidebarMode == SETTINGS_MODE then return true end
+    local selected = self:FindSidebarTab(self.sidebarMode)
+    if selected ~= nil and selected.mount == nil then return true end
+    return self.collapseSidebar == true and self.sidebarMode == nil
+end
+
+-- Apply the preference immediately while preserving the current selection.
+function SidebarHost:SetCollapseSidebar(enabled)
+    self.collapseSidebar = enabled == true
+    if not self.collapseSidebar and self.sidebarMode == nil then self.sidebarMode = self:FirstSidebarTab() end
+    self:RefreshSidebar()
+    self:UpdateLayoutControls()
+    self:Changed(false)
+end
+
 -- Show the sidebar content, or open the page if there is none.
 function SidebarHost:SetSidebarMode(selectedTabID)
+    if self.pageTransitions > 0 then return end
     local tab = self:FindSidebarTab(selectedTabID)
+    local deselected = false
+    if tab ~= nil and self.sidebarMode == selectedTabID and (self.collapseSidebar or tab.mount == nil) then
+        local page = self.shownPage
+        if page ~= nil and page.owner.id == tab.extensionID and not self:ReturnToBank() then return end
+        selectedTabID, tab = nil, nil
+        deselected = true
+    end
     if tab ~= nil and tab.mount == nil then
-        if tab.open ~= nil then tab.open() end
+        if tab.open == nil or not tab.open() then return end
+        self.sidebarMode = selectedTabID
+        self:RefreshSidebar()
+        self:UpdateLayoutControls()
+        self:Changed(false)
         return
     end
-    if tab == nil then selectedTabID = self:FirstSidebarTab() end
+    if tab ~= nil and self.shownPage == self.settingsPage and self.settingsPage ~= nil then
+        if not self:ReturnToBank() then return end
+    end
+    if tab == nil and not self.collapseSidebar and not deselected then selectedTabID = self:FirstSidebarTab() end
     if self.sidebarMode == selectedTabID then
         self:UpdateLayoutControls()
         return
@@ -199,8 +264,8 @@ end
 function SidebarHost:SetExtensionTabs(tabs)
     self.extensionTabs = sortByRailOrder(tabs, self.readRailOrder())
     local selected = self:FindSidebarTab(self.sidebarMode)
-    if selected == nil or selected.mount == nil then
-        self.sidebarMode = self:FirstSidebarTab()
+    if selected == nil and self.sidebarMode ~= SETTINGS_MODE then
+        self.sidebarMode = not self.collapseSidebar and self:FirstSidebarTab() or nil
     end
     self:UpdateLayoutControls()
     self:RefreshSidebar()

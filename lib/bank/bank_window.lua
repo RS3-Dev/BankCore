@@ -459,12 +459,23 @@ function BankWindow:RestoreBankWindowSizeAndPosition()
     end
 end
 
--- Widen the bank for the sidebar and record what it added
-function BankWindow:WidenBankForSidebar()
+-- Reserve the rail alone when the optional content column is collapsed.
+local function sidebarExpansionWidth(self)
+    local collapsed = self.collapseSidebar == true and self.sidebarMode == nil
+    if self.IsSidebarCollapsed ~= nil then collapsed = self:IsSidebarCollapsed() end
+    if collapsed then
+        return Config.SIDEBAR_TAB_WIDTH + Config.SIDEBAR_TAB_GAP
+    end
+    return Config.SIDEBAR_WIDTH
+end
+
+-- Widen the bank for the sidebar and record what it added.
+function BankWindow:WidenBankForSidebar(width)
+    width = width or sidebarExpansionWidth(self)
     self.expansion = {}
     self.expansionRecord = nil
-    expandWindow(self.components, Config.SIDEBAR_WIDTH, self.expansion)
-    local record = { sidebarWidth = Config.SIDEBAR_WIDTH, parts = {} }
+    expandWindow(self.components, width, self.expansion)
+    local record = { sidebarWidth = width, parts = {} }
     for _, entry in ipairs(self.expansion) do
         local partLayout = readPartLayout(entry.value)
         record.parts[#record.parts + 1] = { slot = entry.slot, x = entry.x, width = entry.width,
@@ -472,6 +483,16 @@ function BankWindow:WidenBankForSidebar()
     end
     self.windowRecord.value = record
     self.expansionRecord = record
+end
+
+-- Replace only Core's added width, keeping the player's native window size.
+function BankWindow:UpdateSidebarExpansion()
+    local width = sidebarExpansionWidth(self)
+    if self.expansionRecord ~= nil and self.expansionRecord.sidebarWidth == width then return end
+    self:RestoreBankWindowSizeAndPosition()
+    self:WidenBankForSidebar(width)
+    self.windowRecord:Save()
+    self.lastBankWindowMeasurements = nil
 end
 
 function BankWindow:ReadBankWindowMeasurements()
@@ -693,6 +714,13 @@ end
 -- A visible close button means the preset selector is open.
 function BankWindow:IsPresetViewOpen()
     return controlIsVisible(PRESET_CLOSE_BUTTON_COMPONENT_ID)
+end
+
+-- Prefer the current control over the last tab-selection event.
+function BankWindow:IsNativeViewAll()
+    local detected = self:DetectNativeViewAll()
+    if detected ~= nil then return detected end
+    return self.nativeViewAll == true
 end
 
 function BankWindow:DetectNativeViewAll()
