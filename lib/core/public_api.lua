@@ -2,7 +2,7 @@
 
 local PublicAPI = {}
 
-local function createExtensionHandle(pluginPages, extension)
+local function createExtensionHandle(pluginPages, menuRouter, extension)
     return {
         SetPage = function(_, page) return pluginPages:SetPage(extension, page) end,
         Refresh = function() return pluginPages:Refresh(extension) end,
@@ -12,18 +12,13 @@ local function createExtensionHandle(pluginPages, extension)
         GetBankItems = function() return pluginPages:BankItems(extension) end,
         GetBankBounds = function() return pluginPages:BankBounds(extension) end,
         GetBankState = function() return pluginPages:BankState(extension) end,
-        GetMenuItem = function(_, menu)
-            local router = pluginPages.menuRouter
-            if router == nil or not pluginPages:IsLive(extension) then return nil end
-            return router:Describe(extension, menu)
-        end,
+        GetMenuItem = function(_, menu) return menuRouter:Describe(extension, menu) end,
         Dispose = function() return pluginPages:DisposeOwner(extension) end,
     }
 end
 
 -- Keep only functions here because the game copies this table.
 function PublicAPI.new(pluginPages, menuRouter)
-    pluginPages.menuRouter = menuRouter
     return {
         SanitizeString = function(text)
             if type(text) ~= "string" then return nil, "invalid", "text must be a string" end
@@ -34,7 +29,7 @@ function PublicAPI.new(pluginPages, menuRouter)
         Register = function(registration)
             local extension, reason, detail = pluginPages:RegisterOwner(registration)
             if extension == nil then return nil, reason, detail end
-            return createExtensionHandle(pluginPages, extension)
+            return createExtensionHandle(pluginPages, menuRouter, extension)
         end,
     }
 end

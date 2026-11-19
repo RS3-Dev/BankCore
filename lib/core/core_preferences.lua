@@ -8,7 +8,7 @@ local MAX_RAIL_ORDER = 64
 local ID_LENGTH = 64
 
 function CorePreferences.defaults()
-    return { enableDebug = false, collapseSidebar = false, railOrder = {} }
+    return { enableDebug = false, railOrder = {} }
 end
 
 -- Skip invalid or duplicate plugin IDs.
@@ -33,7 +33,6 @@ function CorePreferences.load()
     end)
     if not ok or type(saved) ~= "table" then return value end
     if type(saved.enableDebug) == "boolean" then value.enableDebug = saved.enableDebug end
-    if type(saved.collapseSidebar) == "boolean" then value.collapseSidebar = saved.collapseSidebar end
     value.railOrder = readRailOrder(saved.railOrder)
     return value
 end
@@ -41,8 +40,7 @@ end
 function CorePreferences.save(value)
     local ok, saved = pcall(function()
         return PersistentDB:SetStructuredData(Config.PREFERENCES_KEY,
-            { enableDebug = value.enableDebug == true, collapseSidebar = value.collapseSidebar == true,
-                railOrder = value.railOrder })
+            { enableDebug = value.enableDebug == true, railOrder = value.railOrder })
     end)
     return ok and saved ~= false
 end

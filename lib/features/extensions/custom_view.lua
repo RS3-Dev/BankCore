@@ -114,7 +114,6 @@ end
 function CustomView:Revoke()
     if not self.live then return end
     self.live = false
-    if self.actions.revoke ~= nil then self.actions.revoke() end
     for _, binding in ipairs(self.bindings) do
         if binding.active then restoreClickthrough(binding) end
     end

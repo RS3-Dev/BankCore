@@ -1,8 +1,8 @@
 {
   "name": "Bank Core",
-  "version": "1.1.2",
+  "version": "1.1.4",
   "hasRibbonIcon": false,
-  "hasSettingsIcon": false,
+  "hasSettingsIcon": true,
   "requiredPermissions": [],
   "optionalPermissions": [],
   "contactEmailAddress": "plugins@rs3.dev",
