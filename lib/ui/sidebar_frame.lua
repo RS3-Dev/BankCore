@@ -13,6 +13,12 @@ local CONTENT_OFFSET = Config.SIDEBAR_TAB_WIDTH + Config.SIDEBAR_TAB_GAP
 local HEADER_HEIGHT = 36
 local RETURN_BUTTON_HEIGHT = 32
 local CLASSIC_TITLE_SPRITE_HEIGHT = 40
+local SETTINGS_SPACE = Config.SIDEBAR_TAB_WIDTH + 4
+
+-- Keep Core's settings below the plugin rail, outside its scrolling controls.
+function SidebarFrame.PluginRailHeight(height)
+    return math.max(0, height - SETTINGS_SPACE)
+end
 
 -- Reserve the top row for Core without changing plugin-local coordinates.
 function SidebarFrame.ContentHeight(height)
@@ -69,7 +75,8 @@ function SidebarFrame.Create(bankView, parent, height, x, y, actions)
         bankView.sidebarOuterFrame.rgba = Theme.INNER_FRAME
         bankView.sidebarOuterFrame.clickthrough = true
         bankView.sidebarHeader = ui.Layer.new(bankView.sidebarRoot)
-        bankView.sidebarHeader:SetSize(0, CLASSIC_TITLE_SPRITE_HEIGHT, 1, 0)
+        local fullWidth = Config.SIDEBAR_WIDTH + Config.CLASSIC_SIDEBAR_LEFT_PADDING
+        bankView.sidebarHeader:SetSize(fullWidth, CLASSIC_TITLE_SPRITE_HEIGHT)
         bankView.sidebarHeader.clickthrough = true
         sprite(bankView.sidebarHeader, id.Sprite.RS3_MODAL_WINDOW_1_TITLE_CORNER,
             0, 0, 28, CLASSIC_TITLE_SPRITE_HEIGHT)
@@ -80,16 +87,29 @@ function SidebarFrame.Create(bankView, parent, height, x, y, actions)
         local endTile = sprite(bankView.sidebarHeader, id.Sprite.RS3_MODAL_WINDOW_1_TOP_TILE,
             -64, 0, 64, CLASSIC_TITLE_SPRITE_HEIGHT)
         endTile:SetPos(-64, 0, 1, 0)
+        bankView.sidebarCollapsedHeader = sprite(bankView.sidebarRoot,
+            id.Sprite.RS3_MODAL_WINDOW_1_TITLE_CORNER, 0, 0, 0, CLASSIC_TITLE_SPRITE_HEIGHT, 1, 0)
+        bankView.sidebarCollapsedHeader.hidden = true
         -- Stretch every title section equally so their bottom borders meet.
         bankView.sidebarTitle = prettyui.Text.new(bankView.sidebarHeader, {
             text = "Bank Plugins", x = 8, y = 4,
-            width = bankView.sidebarRoot.width - 16, height = 34,
+            width = fullWidth - 16, height = 34,
             font = id.Font.CINZEL_13PT_BOLD, colour = 0xF2C66DFF,
             alignHorizontal = ui.AlignMode.CENTRE,
             alignVertical = ui.AlignMode.CENTRE,
         })
         bankView.sidebarTitle.clickthrough = true
     end
+    -- Tooltips need a sibling of the page, rather than a child of the sidebar.
+    bankView.sidebarTooltipOverlay = ui.Layer.new(parent)
+    bankView.sidebarTooltipOverlay:SetPos(0, 0)
+    bankView.sidebarTooltipOverlay:SetSize(0, 0, 1.0, 1.0)
+    bankView.sidebarTooltipOverlay.clickthrough = true
+    -- The overlay and sidebar are siblings at (0, 0); measure through their bank parent.
+    local function tooltipPosition(target)
+        return UICoordinates.relativePosition(target, parent)
+    end
+    prettyui.Tooltip.registerContext(bankView.sidebarRoot, bankView.sidebarTooltipOverlay, tooltipPosition)
     bankView.returnToBankButton = BankControls.button(bankView.sidebarRoot, "Return to Bank", actions.onReturn, {
         x = x + CONTENT_OFFSET, y = y,
         width = Config.SIDEBAR_COLUMN_WIDTH - 8,
@@ -99,10 +119,21 @@ function SidebarFrame.Create(bankView, parent, height, x, y, actions)
     bankView.tabRail = SidebarTabRail.new(bankView.sidebarRoot, {
         x = x,
         y = y,
-        height = height,
+        height = SidebarFrame.PluginRailHeight(height),
         onSelect = actions.onSelect,
         onReorder = actions.onReorder,
+        tooltipParent = bankView.sidebarTooltipOverlay,
+        tooltipPosition = tooltipPosition,
     })
+    bankView.settingsButton = BankControls.button(bankView.sidebarRoot, "", actions.onSettings, {
+        x = x, y = y + math.max(0, height - Config.SIDEBAR_TAB_WIDTH),
+        size = Config.SIDEBAR_TAB_WIDTH, spriteName = "SETTINGS", iconSize = 20,
+        tooltip = "Bank Core settings",
+    })
+    bankView.settingsSelectionFrame = BankControls.frame(bankView.sidebarRoot, Theme.SELECTED_BORDER)
+    bankView.settingsSelectionFrame:SetPos(x, y + math.max(0, height - Config.SIDEBAR_TAB_WIDTH))
+    bankView.settingsSelectionFrame:SetSize(Config.SIDEBAR_TAB_WIDTH, Config.SIDEBAR_TAB_WIDTH)
+    bankView.settingsSelectionFrame.hidden = true
     bankView.rail = ui.Layer.new(bankView.sidebarRoot)
     bankView.rail:SetPos(x + CONTENT_OFFSET, y + HEADER_HEIGHT)
     bankView.rail:SetSize(Config.SIDEBAR_COLUMN_WIDTH - 8, contentHeight)
@@ -125,7 +156,13 @@ end
 
 function SidebarFrame.Resize(bankView, height)
     local contentHeight = SidebarFrame.ContentHeight(height)
-    bankView.tabRail:SetHeight(height)
+    bankView.tabRail:SetHeight(SidebarFrame.PluginRailHeight(height))
+    local button = bankView.settingsButton
+    button.root:SetPos(bankView.tabRail.x, bankView.tabRail.y + math.max(0, height - Config.SIDEBAR_TAB_WIDTH))
+    bankView.settingsSelectionFrame:SetPos(button.root.x, button.root.y)
+    if button.icon ~= nil then
+        button.icon:SetPos(button.root.x + 6, button.root.y + 6)
+    end
     bankView.rail:SetSize(Config.SIDEBAR_COLUMN_WIDTH - 8, contentHeight)
     bankView.railBackground:SetSize(Config.SIDEBAR_COLUMN_WIDTH - 8, contentHeight)
 end
@@ -134,6 +171,17 @@ function SidebarFrame.RaiseEdges(bankView)
     if bankView.railFrame ~= nil then bankView.railFrame:MoveToFront() end
     if bankView.sidebarOuterFrame ~= nil then bankView.sidebarOuterFrame:MoveToFront() end
     if bankView.sidebarInnerFrame ~= nil then bankView.sidebarInnerFrame:MoveToFront() end
+    if bankView.sidebarTooltipOverlay ~= nil then bankView.sidebarTooltipOverlay:MoveToFront() end
+end
+
+-- Hide the content column without hiding the plugin rail or settings button.
+function SidebarFrame.SetCollapsed(bankView, collapsed)
+    if bankView.rail ~= nil then bankView.rail.hidden = collapsed end
+    if bankView.returnToBankButton ~= nil then bankView.returnToBankButton.root.hidden = collapsed end
+    if bankView.detachedSidebar then
+        if bankView.sidebarHeader ~= nil then bankView.sidebarHeader.hidden = collapsed end
+        if bankView.sidebarCollapsedHeader ~= nil then bankView.sidebarCollapsedHeader.hidden = not collapsed end
+    end
 end
 
 function SidebarFrame.Destroy(bankView)
@@ -143,11 +191,16 @@ function SidebarFrame.Destroy(bankView)
         if not ok then failure = failure or message end
     end
     if bankView.returnToBankButton ~= nil then cleanup(function() bankView.returnToBankButton:Destroy() end) end
+    if bankView.settingsButton ~= nil then cleanup(function() bankView.settingsButton:Destroy() end) end
     if bankView.tabRail ~= nil then cleanup(function() bankView.tabRail:Destroy() end) end
     if bankView.rail ~= nil then cleanup(function() prettyui.Tooltip.unregisterContext(bankView.rail) end) end
+    if bankView.sidebarRoot ~= nil then cleanup(function() prettyui.Tooltip.unregisterContext(bankView.sidebarRoot) end) end
+    if bankView.sidebarTooltipOverlay ~= nil then cleanup(function() bankView.sidebarTooltipOverlay:Destroy() end) end
     if bankView.sidebarRoot ~= nil then cleanup(function() bankView.sidebarRoot:Destroy() end) end
     if bankView.sidebarOverlay ~= nil then cleanup(function() bankView.sidebarOverlay:Destroy() end) end
     bankView.returnToBankButton = nil
+    bankView.settingsButton = nil
+    bankView.settingsSelectionFrame = nil
     bankView.sidebarRoot = nil
     bankView.sidebarOverlay = nil
     bankView.sidebarBackground = nil
@@ -155,7 +208,9 @@ function SidebarFrame.Destroy(bankView)
     bankView.sidebarOuterFrame = nil
     bankView.sidebarInnerFrame = nil
     bankView.sidebarHeader = nil
+    bankView.sidebarCollapsedHeader = nil
     bankView.sidebarTitle = nil
+    bankView.sidebarTooltipOverlay = nil
     bankView.tabRail = nil
     bankView.rail = nil
     bankView.railBackground = nil

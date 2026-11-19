@@ -13,8 +13,6 @@ local BANK_OPEN_EVENT = Config.CORE_REF .. "_bank_open"
 local BANK_CLOSE_EVENT = Config.CORE_REF .. "_bank_close"
 local BANK_UPDATE_EVENT = Config.CORE_REF .. "_bank_update"
 local GAME_STATE_EVENT = Config.CORE_REF .. "_game_state"
-local CONTENT_EVENT = Config.CORE_REF .. "_content"
-local SETTINGS_EVENT = Config.CORE_REF .. "_settings"
 local BANK_VISIBILITY_EVENT = Config.CORE_REF .. "_bank_visibility"
 local BANK_VAR_EVENT = Config.CORE_REF .. "_bank_var"
 local BANK_TRANSITION_EVENT = Config.CORE_REF .. "_bank_transition"
@@ -29,13 +27,6 @@ end
 function Lifecycle:Start()
     local session = self.session
     local options = self.options
-
-    Event.ContentLayerReady.Subscribe(CONTENT_EVENT, function(event)
-        session:CreateContentLayer(event.component)
-    end)
-    Event.SettingsLayerReady.Subscribe(SETTINGS_EVENT, function(event)
-        session:CreateContentLayer(event.component)
-    end)
 
     Event.GameStateChanged.Subscribe(GAME_STATE_EVENT, function(event)
         if event.newState == GameState.GAME then
@@ -162,8 +153,6 @@ function Lifecycle:Shutdown()
     end
 
     Event.MiniMenuReady.Unsubscribe(MENU_EVENT)
-    Event.ContentLayerReady.Unsubscribe(CONTENT_EVENT)
-    Event.SettingsLayerReady.Unsubscribe(SETTINGS_EVENT)
     Event.MiniMenuEntrySelected.Unsubscribe(BANK_ACTION_EVENT)
     Event.GameStateChanged.Unsubscribe(GAME_STATE_EVENT)
     Event.InventoryAdded.Unsubscribe(BANK_OPEN_EVENT)
