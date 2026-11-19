@@ -75,7 +75,8 @@ function SidebarFrame.Create(bankView, parent, height, x, y, actions)
         bankView.sidebarOuterFrame.rgba = Theme.INNER_FRAME
         bankView.sidebarOuterFrame.clickthrough = true
         bankView.sidebarHeader = ui.Layer.new(bankView.sidebarRoot)
-        bankView.sidebarHeader:SetSize(0, CLASSIC_TITLE_SPRITE_HEIGHT, 1, 0)
+        local fullWidth = Config.SIDEBAR_WIDTH + Config.CLASSIC_SIDEBAR_LEFT_PADDING
+        bankView.sidebarHeader:SetSize(fullWidth, CLASSIC_TITLE_SPRITE_HEIGHT)
         bankView.sidebarHeader.clickthrough = true
         sprite(bankView.sidebarHeader, id.Sprite.RS3_MODAL_WINDOW_1_TITLE_CORNER,
             0, 0, 28, CLASSIC_TITLE_SPRITE_HEIGHT)
@@ -86,10 +87,13 @@ function SidebarFrame.Create(bankView, parent, height, x, y, actions)
         local endTile = sprite(bankView.sidebarHeader, id.Sprite.RS3_MODAL_WINDOW_1_TOP_TILE,
             -64, 0, 64, CLASSIC_TITLE_SPRITE_HEIGHT)
         endTile:SetPos(-64, 0, 1, 0)
+        bankView.sidebarCollapsedHeader = sprite(bankView.sidebarRoot,
+            id.Sprite.RS3_MODAL_WINDOW_1_TITLE_CORNER, 0, 0, 0, CLASSIC_TITLE_SPRITE_HEIGHT, 1, 0)
+        bankView.sidebarCollapsedHeader.hidden = true
         -- Stretch every title section equally so their bottom borders meet.
         bankView.sidebarTitle = prettyui.Text.new(bankView.sidebarHeader, {
             text = "Bank Plugins", x = 8, y = 4,
-            width = bankView.sidebarRoot.width - 16, height = 34,
+            width = fullWidth - 16, height = 34,
             font = id.Font.CINZEL_13PT_BOLD, colour = 0xF2C66DFF,
             alignHorizontal = ui.AlignMode.CENTRE,
             alignVertical = ui.AlignMode.CENTRE,
@@ -174,6 +178,10 @@ end
 function SidebarFrame.SetCollapsed(bankView, collapsed)
     if bankView.rail ~= nil then bankView.rail.hidden = collapsed end
     if bankView.returnToBankButton ~= nil then bankView.returnToBankButton.root.hidden = collapsed end
+    if bankView.detachedSidebar then
+        if bankView.sidebarHeader ~= nil then bankView.sidebarHeader.hidden = collapsed end
+        if bankView.sidebarCollapsedHeader ~= nil then bankView.sidebarCollapsedHeader.hidden = not collapsed end
+    end
 end
 
 function SidebarFrame.Destroy(bankView)
@@ -200,6 +208,7 @@ function SidebarFrame.Destroy(bankView)
     bankView.sidebarOuterFrame = nil
     bankView.sidebarInnerFrame = nil
     bankView.sidebarHeader = nil
+    bankView.sidebarCollapsedHeader = nil
     bankView.sidebarTitle = nil
     bankView.sidebarTooltipOverlay = nil
     bankView.tabRail = nil

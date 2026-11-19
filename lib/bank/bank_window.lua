@@ -86,12 +86,19 @@ local function sidebarParent(self)
         or component(id.Component.TOPLEVEL_V2__GAME_AREA)
 end
 
+local function sidebarIsCollapsed(self)
+    if self.IsSidebarCollapsed ~= nil then return self:IsSidebarCollapsed() end
+    return self.collapseSidebar == true and self.sidebarMode == nil
+end
+
 -- Follow the bank using coordinates in the outer layer.
 function BankWindow:PositionDetachedSidebar()
     if not self.detachedSidebar or self.sidebarRoot == nil then return end
     local x, y = UICoordinates.absolutePosition(self.components.all)
     local parentX, parentY = UICoordinates.absolutePosition(self.sidebarRoot.parent)
-    local width = Config.SIDEBAR_WIDTH + Config.CLASSIC_SIDEBAR_LEFT_PADDING
+    local contentWidth = sidebarIsCollapsed(self)
+        and (Config.SIDEBAR_TAB_WIDTH + Config.SIDEBAR_TAB_GAP) or Config.SIDEBAR_WIDTH
+    local width = contentWidth + Config.CLASSIC_SIDEBAR_LEFT_PADDING
     self.sidebarRoot:SetPos(x - parentX - width, y - parentY)
     self.sidebarRoot:SetSize(width, self.components.all.height)
     if self.sidebarOverlay ~= nil then
@@ -461,9 +468,7 @@ end
 
 -- Reserve the rail alone when the optional content column is collapsed.
 local function sidebarExpansionWidth(self)
-    local collapsed = self.collapseSidebar == true and self.sidebarMode == nil
-    if self.IsSidebarCollapsed ~= nil then collapsed = self:IsSidebarCollapsed() end
-    if collapsed then
+    if sidebarIsCollapsed(self) then
         return Config.SIDEBAR_TAB_WIDTH + Config.SIDEBAR_TAB_GAP
     end
     return Config.SIDEBAR_WIDTH
@@ -471,6 +476,7 @@ end
 
 -- Widen the bank for the sidebar and record what it added.
 function BankWindow:WidenBankForSidebar(width)
+    if self.detachedSidebar then return end
     width = width or sidebarExpansionWidth(self)
     self.expansion = {}
     self.expansionRecord = nil
@@ -487,6 +493,11 @@ end
 
 -- Replace only Core's added width, keeping the player's native window size.
 function BankWindow:UpdateSidebarExpansion()
+    if self.detachedSidebar then
+        self:PositionDetachedSidebar()
+        self.lastBankWindowMeasurements = nil
+        return
+    end
     local width = sidebarExpansionWidth(self)
     if self.expansionRecord ~= nil and self.expansionRecord.sidebarWidth == width then return end
     self:RestoreBankWindowSizeAndPosition()
