@@ -92,8 +92,7 @@ if package ~= nil and package.loaded ~= nil then
 end
 
 local BankSession = require("lib/core/bank_session")
-local session = BankSession.new({ pluginPages = rawget(_G, "__bankcore_registrations") })
-_G.__bankcore_registrations = session.pluginPages
+local session = BankSession.new()
 _G.__bankcore_session = session
 session:Start()
 

@@ -118,37 +118,17 @@ function PluginPages.new(bankView, options)
     return self
 end
 
--- Attach retained registrations to a fresh bank session after Core reloads.
-function PluginPages.Attach(self, bankView, options)
-    setmetatable(self, PluginPages)
-    self.layout = bankView
-    self.isInGame, self.bankIsOpen = options.isInGame, options.bankIsOpen
-    self.suspended, self.closed = false, false
-    self.pluginCallbacks = 0
-    bankView.onChange = function() self:Notify() end
-    for _, extension in pairs(self.owners) do
-        extension.heardState, extension.heardItems = nil, nil
-        extension.shown, extension.bankClosed, extension.redrawPending = false, false, false
-        if extension.callbacks.column ~= nil then
-            extension.mount = ExtensionMounts.new(self, extension, extension.callbacks.column)
-        end
-    end
-    self.publishPending = true
-    self:QueueRefresh()
-    self:Notify()
-    return self
-end
-
 function PluginPages:IsChanging()
-    return self.suspended or self.layout.pageTransitions > 0 or self.pluginCallbacks > 0
+    return self.layout.pageTransitions > 0 or self.pluginCallbacks > 0
 end
 
 function PluginPages:BankReady()
-    return not self.suspended and self.isInGame() and self.bankIsOpen() and self.layout.active
+    return self.isInGame() and self.bankIsOpen() and self.layout.active
 end
 
 function PluginPages:ViewAll()
-    return self.layout:IsNativeViewAll()
+    local bankView = self.layout
+    return bankView.nativeViewAll or bankView:DetectNativeViewAll() == true
 end
 
 -- Explain why the page cannot open, or return nil.
@@ -167,13 +147,12 @@ function PluginPages:IsLive(extension)
 end
 
 function PluginPages:ShownPage(extension)
-    local page = self.layout ~= nil and self.layout.shownPage or nil
+    local page = self.layout.shownPage
     return page ~= nil and page.owner == extension and page or nil
 end
 
 -- Build sidebar tabs for plugins with icons.
 function PluginPages:PublishTabs()
-    if self.suspended then self.publishPending = true; return end
     -- Wait until the sidebar finishes rebuilding.
     if self.pluginCallbacks > 0 then
         self.publishPending = true
@@ -191,7 +170,7 @@ function PluginPages:PublishTabs()
         local extension = self.owners[extensionID]
         tabs[#tabs + 1] = { id = TAB_PREFIX .. extension.id, extensionID = extension.id,
             label = extension.name, tooltip = extension.name, icon = extension.icon, mount = extension.mount,
-            open = extension.mount == nil and function() return self:Open(extension) end or nil }
+            open = extension.mount == nil and function() self:Open(extension) end or nil }
     end
     self.layout:SetExtensionTabs(tabs)
 end
@@ -204,7 +183,7 @@ function PluginPages:Transition(action)
 end
 
 function PluginPages:QueueRefresh()
-    if self.closed or self.suspended then return end
+    if self.closed then return end
     Event.Logic.Subscribe(self.refreshEvent, function()
         Event.Logic.Unsubscribe(self.refreshEvent)
         self:RunQueued()
@@ -213,7 +192,6 @@ end
 
 -- Finish work delayed by drawing or page changes.
 function PluginPages:RunQueued()
-    if self.closed or self.suspended then return end
     if self.publishPending then self:PublishTabs() end
     self:LeaveRemovedPage()
     local page = self.layout.shownPage
@@ -222,9 +200,7 @@ end
 
 -- Return to the bank when the page's plugin is gone.
 function PluginPages:LeaveRemovedPage()
-    if self.suspended then return end
     local page = self.layout.shownPage
-    if page ~= nil and page == self.layout.settingsPage then return end
     if page == nil or self:IsLive(page.owner) then return end
     -- Leave the page on the next game update, after the current change finishes.
     if self:IsChanging() then
@@ -237,7 +213,6 @@ end
 -- Register a plugin, replacing any with the same ID.
 function PluginPages:RegisterOwner(description)
     if self.closed then return nil, "stopped" end
-    if self.suspended then return nil, "busy" end
     if self.pluginCallbacks > 0 then return nil, "busy" end
     local registration, problem = readRegistration(description)
     if registration == nil then return nil, "invalid", problem end
@@ -396,7 +371,9 @@ function PluginPages:ReadBankState()
         searchActive = false, filterActive = false }
     if not state.bankOpen then return state end
     local layout = self.layout
-    state.viewAll = self:ViewAll()
+    local detected = layout:DetectNativeViewAll()
+    if detected == nil then detected = layout.nativeViewAll end
+    state.viewAll = detected
     state.presetOpen = layout:IsPresetViewOpen()
     local mode = layout:ReadNativeFilterMode()
     state.searchActive = mode == "search"
@@ -425,13 +402,13 @@ end
 
 -- Send one close notification per bank opening on the next game update.
 function PluginPages:BankClosed()
-    if self.closed or self.suspended or not self.layout.active then return end
+    if self.closed or not self.layout.active then return end
     for _, extension in pairs(self.owners) do extension.bankClosed = true end
     self:Notify()
 end
 
 function PluginPages:Notify()
-    if self.closed or self.suspended then return end
+    if self.closed then return end
     Event.Logic.Subscribe(self.notifyEvent, function()
         Event.Logic.Unsubscribe(self.notifyEvent)
         self:DeliverChanges()
@@ -506,36 +483,9 @@ function PluginPages:DeliverChanges()
     end
 end
 
--- Release session references while retaining registrations and prepared pages.
-function PluginPages:Suspend()
-    if self.closed or self.suspended then return end
-    local layout = self.layout
-    local shown = layout.shownPage
-    local owners = {}
-    for _, extension in pairs(self.owners) do owners[#owners + 1] = extension end
-    self.suspended, self.layout, self.menuRouter = true, nil, nil
-    self.isInGame, self.bankIsOpen = nil, nil
-    Event.Logic.Unsubscribe(self.refreshEvent)
-    Event.Logic.Unsubscribe(self.notifyEvent)
-    for _, extension in ipairs(owners) do
-        local wasShown = extension.shown or (shown ~= nil and shown.owner == extension)
-        extension.shown = false
-        if self:IsLive(extension) and wasShown then callExtensionCallback(extension, "onClose") end
-        if self:IsLive(extension) and (layout.active or extension.bankClosed) then
-            callExtensionCallback(extension, "onBankClose")
-        end
-        extension.mount = nil
-    end
-end
-
--- Close all plugins and clear tabs before permanent disposal.
+-- Close all plugins and clear tabs before shutdown.
 function PluginPages:Close()
     if self.closed then return end
-    if self.suspended then
-        self.owners = {}
-        self.closed = true
-        return
-    end
     local bankOpen = self.layout.active
     local page = self.layout.shownPage
     local shownExtension = page ~= nil and page.owner or nil

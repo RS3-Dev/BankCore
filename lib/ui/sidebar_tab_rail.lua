@@ -66,8 +66,7 @@ function SidebarTabRail.new(parent, options)
     self.root:SetSize(TAB_SIZE, self.height)
     self.root.clickthrough = false
     -- Draw tooltips outside the icon strip so they are not cut off.
-    local tooltipParent = options.tooltipParent or parent
-    prettyui.Tooltip.registerContext(self.root, tooltipParent, options.tooltipPosition or function(target)
+    prettyui.Tooltip.registerContext(self.root, parent, function(target)
         return UICoordinates.relativePosition(target, parent)
     end)
     self.background = ui.Sprite.new(self.root)
