@@ -79,7 +79,8 @@ function SidebarHost:RefreshTabMount(tab)
     if self.tabMount ~= nil and self.tabMount ~= columnMount then self:CloseTabMount() end
     if columnMount == nil or self.tabMount == columnMount then return end
     -- Leave room for the outline.
-    if columnMount:Open(self.rail, self.components.all, self:TabMountBounds()) then
+    local overlayParent = self.detachedSidebar and self.sidebarOverlay or self.components.all
+    if columnMount:Open(self.rail, overlayParent, self:TabMountBounds()) then
         self.tabMount = columnMount
     end
     SidebarFrame.RaiseEdges(self)
@@ -94,6 +95,9 @@ end
 function SidebarHost:RefreshSidebar()
     if self.emptyLabel == nil then return end
     local tab = self:FindSidebarTab(self.sidebarMode)
+    if self.sidebarTitle ~= nil then
+        self.sidebarTitle.content = tab ~= nil and tab.label or "Bank Plugins"
+    end
     self:RefreshTabMount(tab)
     if tab == nil then
         self.emptyLabel.content = "No bank plugins found."
@@ -121,7 +125,8 @@ end
 
 function SidebarHost:CreateSidebar(parent, height)
     self.sidebarHeight = height
-    SidebarFrame.Create(self, parent, height, RAIL_X, RAIL_Y, {
+    local x = self.detachedSidebar and Config.CLASSIC_SIDEBAR_LEFT_PADDING or RAIL_X
+    SidebarFrame.Create(self, parent, height, x, RAIL_Y, {
         onSelect = function(tabID) self:SetSidebarMode(tabID) end,
         onReorder = function(tabIDs, movedID) self:ReorderSidebarTabs(tabIDs, movedID) end,
         onReturn = function() self:ReturnToBank() end,

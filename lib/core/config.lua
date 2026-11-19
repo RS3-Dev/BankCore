@@ -10,6 +10,8 @@ local Config = {
     SIDEBAR_COLUMN_WIDTH = 244,
     SIDEBAR_TAB_WIDTH = 32,
     SIDEBAR_TAB_GAP = 8,
+    -- Leave eight pixels inside the native eight-pixel window bevel.
+    CLASSIC_SIDEBAR_LEFT_PADDING = 16,
 }
 Config.SIDEBAR_WIDTH = Config.SIDEBAR_TAB_WIDTH + Config.SIDEBAR_TAB_GAP + Config.SIDEBAR_COLUMN_WIDTH
 

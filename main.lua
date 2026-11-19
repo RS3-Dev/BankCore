@@ -95,6 +95,7 @@ local BankSession = require("lib/core/bank_session")
 local session = BankSession.new()
 _G.__bankcore_session = session
 session:Start()
+require("lib/bank/bank_window").LogInterfaceMode()
 
 -- Let other plugins use Core's functions.
 local api = session.publicAPI

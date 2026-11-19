@@ -60,6 +60,46 @@ end
 
 local component = BankInterface.Get
 
+local function interfaceMode()
+    local ok, value = pcall(function() return var.VarPlayer["TOPLEVEL_V2_SKINS_VARP"].value end)
+    if not ok or value == nil then return "unknown", "unavailable" end
+    local mode = value == 26 and "classic" or (value == 9 and "modern" or "unknown")
+    return mode, tostring(value)
+end
+
+-- Report mode detection only when debug logging is enabled.
+function BankWindow.LogInterfaceMode()
+    if not DebugLog.IsEnabled() then return end
+    local mode, value = interfaceMode()
+    debugLog("Bank Core interface mode: ", mode, " (TOPLEVEL_V2_SKINS_VARP=", value,
+        "); sidebar layout: ", mode == "classic" and "detached" or "integrated")
+end
+
+-- Classic mode needs a separate sidebar beside the native bank.
+local function classicUI()
+    return interfaceMode() == "classic"
+end
+
+local function sidebarParent(self)
+    if not self.detachedSidebar then return self.components.all end
+    return component(id.Component.TOPLEVEL_V2__BANK_LAYER)
+        or component(id.Component.TOPLEVEL_V2__GAME_AREA)
+end
+
+-- Follow the bank using coordinates in the outer layer.
+function BankWindow:PositionDetachedSidebar()
+    if not self.detachedSidebar or self.sidebarRoot == nil then return end
+    local x, y = UICoordinates.absolutePosition(self.components.all)
+    local parentX, parentY = UICoordinates.absolutePosition(self.sidebarRoot.parent)
+    local width = Config.SIDEBAR_WIDTH + Config.CLASSIC_SIDEBAR_LEFT_PADDING
+    self.sidebarRoot:SetPos(x - parentX - width, y - parentY)
+    self.sidebarRoot:SetSize(width, self.components.all.height)
+    if self.sidebarOverlay ~= nil then
+        self.sidebarOverlay:SetPos(x - parentX, y - parentY)
+        self.sidebarOverlay:SetSize(self.components.all.width, self.components.all.height)
+    end
+end
+
 -- Find a bank control that may disappear when views change.
 local function dynamicComponent(componentID, categoryID, dynamicID)
     local ok, value = pcall(function()
@@ -154,7 +194,8 @@ local function expandWindow(parts, width, appliedOffsets)
             slot = change.slot,
             value = change.value,
             width = round(change.width - partLayout.widthParent * parentWidthChange),
-            x = round(change.x - partLayout.xParent * parentWidthChange - partLayout.xSelf * change.width),
+            -- Self anchoring subtracts the added width, so add it back here.
+            x = round(change.x - partLayout.xParent * parentWidthChange + partLayout.xSelf * change.width),
         }
     end
     for _, entry in ipairs(plannedOffsets) do
@@ -295,6 +336,16 @@ end
 -- Remember the player's window size while the sidebar is open
 function BankWindow:CaptureFrame()
     local record = self.windowRecord.value
+    -- Do not replace the saved frame with a bank layout reset by the game.
+    if record ~= nil then
+        for _, part in ipairs(record.parts) do
+            if part.slot == "content" then
+                local content = self.components.content
+                local layout = content ~= nil and tryReadPartLayout(content) or nil
+                if layout == nil or layout.x ~= part.expandedX or layout.width ~= part.expandedWidth then return end
+            end
+        end
+    end
     local entry = record ~= nil and findFrameRecord(record) or nil
     local value = entry ~= nil and findPartByName(self.components, entry.slot) or nil
     if value == nil then return end
@@ -328,8 +379,53 @@ local function frameOffsets(entry)
     return frame ~= nil and tryReadPartLayout(frame) or nil
 end
 
+-- Reapply the recorded expansion without clearing it or adding width again.
+function BankWindow:FixBankGeometry()
+    if not self.active then return false end
+    local ok, message = pcall(function()
+        if self.detachedSidebar then
+            self:PositionDetachedSidebar()
+        else
+            local record = self.windowRecord.value
+            if record == nil then error("No saved bank geometry is available.", 0) end
+            local parts = lookUpParts()
+            local changes = {}
+            for _, entry in ipairs(record.parts) do
+                local value = findPartByName(parts, entry.slot)
+                if value ~= nil then
+                    local layout = readPartLayout(value)
+                    changes[#changes + 1] = { value = value, layout = layout, entry = entry }
+                elseif entry.slot == "host" or COMPONENTS[entry.slot] ~= nil then
+                    error("Bank control is unavailable: " .. entry.slot, 0)
+                end
+            end
+            for _, change in ipairs(changes) do
+                local value, layout, entry = change.value, change.layout, change.entry
+                value:SetSize(entry.expandedWidth, layout.height, layout.widthParent, layout.heightParent)
+                value:SetPos(entry.expandedX, layout.y, layout.xParent, layout.yParent, layout.xSelf, layout.ySelf)
+            end
+            -- Undo these offsets on close using the current component handles.
+            self.components, self.expansion = parts, {}
+            for _, change in ipairs(changes) do
+                local entry = change.entry
+                self.expansion[#self.expansion + 1] = {
+                    slot = entry.slot, value = change.value, x = entry.x, width = entry.width,
+                }
+            end
+            self.expansionRecord = record
+            self.windowRecord:Save()
+        end
+        self:ResizeSidebar(self.components.content.height)
+        self.lastBankWindowMeasurements = nil
+        self:Changed(true)
+    end)
+    if not ok then report("Bank Core could not fix bank geometry: ", tostring(message)) end
+    return ok
+end
+
 -- Remove the width Core added, keeping player resizes and the saved changes.
 function BankWindow:RestoreBankWindowSizeAndPosition()
+    if self.detachedSidebar then return end
     -- A failed resize may have applied only some offsets, without creating a new record.
     if self.expansionRecord ~= self.windowRecord.value then
         if not undoExpansion(self.expansion or {}) then
@@ -403,8 +499,24 @@ local function describeBankWindowMeasurements(bankWindowMeasurements)
 end
 
 function BankWindow:WatchBankWindow()
+    -- Some native interactions reset the content offset without replacing its handle.
+    if self.active and self.expanded and not self.detachedSidebar and not self:IsPresetViewOpen() then
+        local record = self.windowRecord.value
+        local content = BankInterface.Find(COMPONENTS.content)
+        local layout = content ~= nil and tryReadPartLayout(content) or nil
+        if record ~= nil and layout ~= nil and content.hidden ~= true and content.height > 0 then
+            for _, entry in ipairs(record.parts) do
+                if entry.slot == "content" and layout.x ~= entry.expandedX then
+                    debugLog("Bank Core reapplying saved geometry after a native layout reset")
+                    self:FixBankGeometry()
+                    break
+                end
+            end
+        end
+    end
     -- Bank panels can change without events, even when no plugin page is open.
     self.onChange()
+    self:PositionDetachedSidebar()
     if self.expanded then
         local content = BankInterface.Find(COMPONENTS.content)
         local height = content ~= nil and content.height or 0
@@ -488,13 +600,22 @@ local function applyWindow(self)
     self.active = true
     debugLog("reading All Items selection")
     self.nativeViewAll = self:DetectNativeViewAll() == true
-    debugLog("widening bank")
-    self:WidenBankForSidebar()
+    self.detachedSidebar = classicUI()
+    if self.detachedSidebar then
+        local cleared, reason = self.windowRecord:Clear()
+        if not cleared then error(reason, 0) end
+    else
+        debugLog("widening bank")
+        self:WidenBankForSidebar()
+    end
     -- Save first so a crash can be recovered.
     self.windowRecord:Save()
     debugLog("creating sidebar; height=", self.components.content.height,
         "; registered tabs=", #self.extensionTabs)
-    self:CreateSidebar(all, self.components.content.height)
+    local parent = sidebarParent(self)
+    if parent == nil then error("the outer bank layer is unavailable", 0) end
+    self:CreateSidebar(parent, self.components.content.height)
+    self:PositionDetachedSidebar()
     debugLog("sidebar created; rail=", self.tabRail ~= nil,
         "; column=", self.rail ~= nil)
     self.expanded = true
@@ -511,7 +632,8 @@ function BankWindow:IsAttachedToCurrentBank()
         local all = component(COMPONENTS.all)
         local content = component(COMPONENTS.content)
         return samePart(all, self.components.all) and samePart(content, self.components.content)
-            and samePart(self.sidebarRoot.parent, all)
+            and (self.detachedSidebar == true) == classicUI()
+            and samePart(self.sidebarRoot.parent, sidebarParent(self))
             and self.sidebarRoot.width > 0 and self.sidebarRoot.height > 0
             and self.sidebarRoot.hidden ~= true and self.sidebarRoot.visibleGlobal ~= false
     end)
@@ -608,6 +730,7 @@ function BankWindow:Restore()
     self.active = false
     self.expanded = false
     self.expansionRecord = nil
+    self.detachedSidebar = nil
     self.components = {}
     self.windowRecord:Save()
     self:Changed(true)
