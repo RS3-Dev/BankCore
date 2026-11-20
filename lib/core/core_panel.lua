@@ -6,7 +6,7 @@ local Theme = require("lib/ui/theme")
 local CorePanel = {}
 CorePanel.__index = CorePanel
 
-local CONTENT_HEIGHT = 476
+local CONTENT_HEIGHT = 516
 CorePanel.CONTENT_HEIGHT = CONTENT_HEIGHT
 local TEXT_COLOUR = 0xD7C9ADFF
 
@@ -29,6 +29,7 @@ function CorePanel.new(parent, options)
         options = options or {},
         enableDebug = preferences.enableDebug == true,
         collapseSidebar = preferences.collapseSidebar == true,
+        expansionDirection = preferences.expansionDirection == "evenly" and "evenly" or "left",
         destroyed = false,
     }, CorePanel)
     local panelWidth = parent.width > 0 and math.min(self.options.width or parent.width, parent.width)
@@ -67,8 +68,28 @@ function CorePanel.new(parent, options)
     for _, option in ipairs(self.collapseToggle.items or {}) do
         option.label.font = id.Font.MUSEO_SANS_11PT_REGULAR
     end
+    self.expansionLabel = prettyui.Text.new(content, {
+        text = "Sidebar expansion (modern interface)", x = x, y = 132,
+        width = width, height = 20, colour = TEXT_COLOUR,
+        font = id.Font.MUSEO_SANS_11PT_REGULAR,
+    })
+    self.expansionToggle = prettyui.CheckboxButton.new(content, {
+        { text = "Left", value = "left", tooltip = "Keep the bank fixed and expand the sidebar to the left" },
+        { text = "Evenly", value = "evenly", tooltip = "Expand evenly on both sides of the bank" },
+    }, {
+        x = x, y = 158, width = width, inline = true,
+        colour = TEXT_COLOUR, selectionCursor = false,
+        selectedValues = { self.expansionDirection },
+        onChange = function(_, _, value, selected)
+            local direction = selected and value or (value == "left" and "evenly" or "left")
+            self:ChangeExpansionDirection(direction)
+        end,
+    })
+    for _, option in ipairs(self.expansionToggle.items or {}) do
+        option.label.font = id.Font.MUSEO_SANS_11PT_REGULAR
+    end
     -- Keep developer tools near the bottom, with scrolling room on short windows.
-    local developerY = math.max(184, self.contentHeight - 292)
+    local developerY = math.max(224, self.contentHeight - 292)
     self.developerHeading, self.developerDivider = sectionHeading(content, "Developer settings", x, developerY, width)
     self.debugToggle = prettyui.CheckboxButton.new(content, {
         { text = "Enable debug", value = "enableDebug",
@@ -155,6 +176,17 @@ function CorePanel:ChangeCollapseSidebar(enabled)
     return saved, reason
 end
 
+function CorePanel:ChangeExpansionDirection(direction)
+    if self.destroyed then return false end
+    local saved, reason = self.options.onChangeExpansionDirection(direction)
+    if saved then self.expansionDirection = direction end
+    -- Update both without firing another change event; exactly one stays selected.
+    self.expansionToggle:SetSelected("left", self.expansionDirection == "left", false)
+    self.expansionToggle:SetSelected("evenly", self.expansionDirection == "evenly", false)
+    self:ShowResult(saved, reason, "Could not save the setting.")
+    return saved, reason
+end
+
 -- Remove controls before the game removes their parent.
 function CorePanel:Destroy()
     if self.destroyed then return end
@@ -162,6 +194,7 @@ function CorePanel:Destroy()
     self.closeButton:Destroy()
     self.debugToggle:Destroy()
     self.collapseToggle:Destroy()
+    self.expansionToggle:Destroy()
     self.resetGeometry:Destroy()
     self.view:Destroy()
 end

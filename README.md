@@ -69,6 +69,10 @@ and collapse its column. This preference is saved and is off by default; the
 settings cog remains available while collapsed. The collapse preference is under
 **General settings**; debug logging and geometry recovery are under
 **Developer settings**, with instructions for repositioning and resetting the bank.
+**Sidebar expansion**, under General settings, offers **Left** (the default) to
+keep the modern bank content fixed, or **Evenly** to expand around its center.
+The linked checkboxes always keep one option selected. The choice applies
+immediately and does not change the detached classic layout.
 Leave debug off during normal play. Feature plugins have their own settings.
 Banking Tweaks supplies modifier-click options.
 

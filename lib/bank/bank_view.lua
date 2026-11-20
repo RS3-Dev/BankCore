@@ -36,6 +36,7 @@ function BankView.new(options)
         customView = nil,
         sidebarMode = nil,
         collapseSidebar = options.collapseSidebar == true,
+        expansionDirection = options.expansionDirection == "evenly" and "evenly" or "left",
         -- Plugin tabs in the player's saved order.
         extensionTabs = {},
         -- The session supplies functions to load and save tab order.
