@@ -28,7 +28,7 @@ for reference and do not need to go in your Core plugin folder.
 ## Use it
 
 1. Open your bank and select **All Items**.
-2. Click a plugin's icon on the left rail. Hover an icon to see its name.
+2. Click a plugin's icon on the rail. Hover an icon to see its name.
 3. Choose a tag, category or search result in that plugin's sidebar.
 4. Use the displayed items with the bank's normal clicks and menus.
 5. Click a native bank tab to return to the normal bank view.
@@ -50,12 +50,13 @@ stack left shows zero.
 
 ## Settings and troubleshooting
 
-The fixed **Settings** cog at the bottom of the bank's left icon rail opens
+The fixed **Settings** cog at the bottom of the bank's icon rail opens
 Core's settings in the bank item area. It stays below the scrolling plugin icons
 and is not a registered plugin. Click it again, or **Return to Bank**, to close
 the settings page. The **X** in the page header also returns to the bank.
-Core no longer has a separate Plugin Hub settings entry.
-Selecting Settings clears the plugin selection and collapses the content column;
+The plugin manager also offers settings, so you can recover from a fully hidden sidebar without a shortcut.
+Selecting Settings clears the plugin selection. The content column stays visible
+in Expanded mode and collapses in Rail only or Fully collapsed mode;
 the cog is highlighted while its page is open. Select a plugin icon to reopen
 that plugin's sidebar. Plugins that provide only a page also highlight their
 icon without opening a sidebar, and clicking their icon again closes the page.
@@ -63,16 +64,29 @@ icon without opening a sidebar, and clicking their icon again closes the page.
 Settings include **Enable debug**, which writes diagnostics to
 the client log, and **Reset geometry**, which clears Core's saved bank window
 adjustments. After resetting, close and reopen the bank to measure a fresh layout.
-**Collapse sidebar when no plugin is selected** keeps only the icon rail visible
-until you choose a plugin. Click the selected plugin icon again to deselect it
-and collapse its column. This preference is saved and is off by default; the
-settings cog remains available while collapsed. The collapse preference is under
-**General settings**; debug logging and geometry recovery are under
-**Developer settings**, with instructions for repositioning and resetting the bank.
-**Sidebar expansion**, under General settings, offers **Left** (the default) to
-keep the modern bank content fixed, or **Evenly** to expand around its center.
-The linked checkboxes always keep one option selected. The choice applies
-immediately and does not change the detached classic layout.
+General settings start with **Sidebar expansion**, followed by **Sidebar position**.
+Position chooses Left (Rail / Sidebar / Bank) or Right (Bank / Sidebar / Rail),
+in either interface mode. Expansion controls modern-mode resizing: **Expand to the side** (the default) keeps
+the native bank stationary and grows toward the chosen side; **Evenly** grows
+around the window's center. Existing Left preferences migrate to Expand to the side + Left.
+
+**Sidebar on bank open** offers **Expanded**, **Rail only** (the default), and
+**Fully collapsed**. The latter two clear the selection when the bank closes.
+Click the selected plugin icon again to collapse its column.
+
+**Expand Sidebar** defaults to **Ctrl** and selects the first icon in your saved rail order. Press it again
+to collapse back to your configured state. It is available in Rail only and Fully
+collapsed modes; the keybind is disabled when the sidebar starts Expanded.
+
+**Enable rail peeking** is available only in Fully collapsed mode. Hold its separate
+**Peek Rail** keybind (default **Shift**) to reveal the rail and release to retract it. Selecting a
+plugin or opening settings keeps that selection visible after you release the key.
+The two keybind fields sit side by side and retain their values when disabled.
+They must use different shortcuts. PrettyUI input capture and blocked keyboard
+input suppress these shortcuts.
+
+Debug logging and geometry recovery are under **Developer settings**, with
+instructions for repositioning and resetting the bank.
 Leave debug off during normal play. Feature plugins have their own settings.
 Banking Tweaks supplies modifier-click options.
 

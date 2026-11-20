@@ -19,7 +19,7 @@ local BANK_ATTACH_RETRY_EVENT = Config.CORE_REF .. "_layout_retry"
 local BANK_ATTACH_DRAW_EVENT = Config.CORE_REF .. "_attachment_timing"
 local BANK_ITEMS_SETTLE_EVENT = Config.CORE_REF .. "_filter_settle"
 local BANK_ITEMS_SETTLE_TICKS = 128
-local BANK_READY_TICKS_REQUIRED = 8
+local BANK_READY_TICKS_REQUIRED = 2
 local BANK_ATTACH_RETRY_TICKS = 120
 
 -- Check less often as the game's bank updates settle.
@@ -111,6 +111,8 @@ function BankSession.new(options)
     options = options or {}
     local session = setmetatable({
         preferences = options.preferences or CorePreferences.load(),
+        sidebarKeybindDown = true,
+        railPeekKeybindDown = true,
         layout = nil,
         panel = nil,
         lifecycle = nil,
@@ -123,8 +125,9 @@ function BankSession.new(options)
         shutDown = false,
     }, BankSession)
     session.layout = BankView.new({
-        collapseSidebar = session.preferences.collapseSidebar,
+        sidebarOpeningState = session.preferences.sidebarOpeningState,
         expansionDirection = session.preferences.expansionDirection,
+        sidebarEdge = session.preferences.sidebarEdge,
         windowRecord = options.windowRecord or BankWindowRecord.load(),
         readRailOrder = function() return session.preferences.railOrder end,
         saveRailOrder = function(railOrder) return session:SavePreference("railOrder", railOrder) end,
@@ -196,7 +199,22 @@ function BankSession:BeginFilterSettle()
     end)
 end
 
--- Wait for eight consecutive ready checks before adding controls.
+-- Experimental: attempt attachment directly from the bank inventory event.
+function BankSession:AttachFromInventory()
+    if not self.inGame or self.shutDown or self.layout.active then return end
+    self.attachmentWanted = true
+    self:StopLayoutRetry()
+    debugLog("inventory received; attempting immediate attachment without readiness checks")
+    local ok, applied = pcall(function() return self.layout:Apply(true) end)
+    if ok and applied then
+        debugLog("immediate inventory attachment succeeded")
+        return
+    end
+    debugLog("immediate inventory attachment failed; retrying normally: ", tostring(applied))
+    self:BeginLayoutRetry()
+end
+
+-- Retry once controls are usable; ongoing native layout changes must not starve attachment.
 function BankSession:BeginLayoutRetry()
     if not self.inGame or self.shutDown then return end
     self.attachmentWanted = true
@@ -208,6 +226,8 @@ function BankSession:BeginLayoutRetry()
     self.layoutRetryTicks = BANK_ATTACH_RETRY_TICKS
     local lastReason
     local checkedTicks, firstReadyTick, stableSince = 0, nil, nil
+    local lastGeometry
+    local geometryChangeLogged = false
     local built, drawSeconds = false, 0
     if DebugLog.IsEnabled() then
         -- The next draw is a paint opportunity, not a measurement of GPU completion.
@@ -234,10 +254,10 @@ function BankSession:BeginLayoutRetry()
             self:StopLayoutRetry()
             return
         end
-        local ready = false
+        local ready, geometry = false, nil
         if open then
             local readyOK
-            readyOK, ready, reason = pcall(function() return self.layout:IsReady() end)
+            readyOK, ready, reason, geometry = pcall(function() return self.layout:IsReady() end)
             if not readyOK then
                 debugLog("readiness ERROR: ", tostring(ready))
                 self.attachmentWanted = false
@@ -252,9 +272,15 @@ function BankSession:BeginLayoutRetry()
         end
         if ready then
             firstReadyTick = firstReadyTick or checkedTicks
+            if geometry ~= lastGeometry and lastGeometry ~= nil and not geometryChangeLogged then
+                debugLog("bank geometry is settling; continuing attachment with current controls")
+                geometryChangeLogged = true
+            end
+            lastGeometry = geometry
             stableSince = stableSince or checkedTicks
             self.layoutReadyTicks = self.layoutReadyTicks + 1
         else
+            lastGeometry = nil
             stableSince = nil
             self.layoutReadyTicks = 0
         end
@@ -308,21 +334,111 @@ function BankSession:SetDebugPreference(enabled)
     return true
 end
 
--- Save before changing the sidebar so a failed write leaves the layout alone.
-function BankSession:SetCollapseSidebarPreference(enabled)
-    local saved, reason = self:SavePreference("collapseSidebar", enabled == true)
-    if not saved then return false, reason end
-    self.layout:SetCollapseSidebar(enabled)
-    return true
-end
-
 function BankSession:SetExpansionDirectionPreference(direction)
-    if direction ~= "left" and direction ~= "evenly" then return false, "Choose Left or Evenly." end
+    if direction ~= "edge" and direction ~= "evenly" then return false, "Choose Expand to the side or Evenly." end
     local saved, reason = self:SavePreference("expansionDirection", direction)
     if not saved then return false, reason end
     self.layout.expansionDirection = direction
     if self.layout.active and self.layout.expanded then self.layout:UpdateSidebarExpansion(true) end
     return true
+end
+
+-- Rebuild only Core's sidebar so native bank controls keep their current state.
+function BankSession:SetSidebarEdgePreference(edge)
+    if edge ~= "left" and edge ~= "right" then return false, "Choose Left or Right." end
+    local saved, reason = self:SavePreference("sidebarEdge", edge)
+    if not saved then return false, reason end
+    local layout = self.layout
+    layout.sidebarEdge = edge
+    if layout.active and layout.expanded then
+        local parent, height = layout.sidebarRoot.parent, layout.sidebarHeight
+        layout:DestroySidebar()
+        layout:UpdateSidebarExpansion(true)
+        layout:CreateSidebar(parent, height)
+        layout:PositionDetachedSidebar()
+        layout:Changed(false)
+    end
+    return true
+end
+
+function BankSession:SetSidebarOpeningStatePreference(state)
+    if state ~= "expanded" and state ~= "rail" and state ~= "hidden" then return false, "Choose an opening state." end
+    local saved, reason = self:SavePreference("sidebarOpeningState", state)
+    if not saved then return false, reason end
+    self.layout:SetSidebarOpeningState(state)
+    return true
+end
+
+function BankSession:SetRailPeekEnabledPreference(enabled)
+    local saved, reason = self:SavePreference("railPeekEnabled", enabled == true)
+    if not saved then return false, reason end
+    if not enabled and self.layout.peekRail then
+        self.layout.peekRail = false
+        self.layout:UpdateLayoutControls()
+        self.layout:Changed(false)
+    end
+    return true
+end
+
+local function sameBinding(first, second)
+    if #first == 0 or #first ~= #second then return false end
+    for _, key in ipairs(first) do
+        local found = false
+        for _, other in ipairs(second) do if key == other then found = true end end
+        if not found then return false end
+    end
+    return true
+end
+
+function BankSession:SaveSidebarKeybind(key, value)
+    local keybind = CorePreferences.ReadKeybind(value)
+    if keybind == nil then return false, "Choose a valid keybind." end
+    local other = key == "sidebarKeybind" and "railPeekKeybind" or "sidebarKeybind"
+    if sameBinding(keybind, self.preferences[other] or {}) then
+        return false, "Expand Sidebar and Peek Rail need different shortcuts."
+    end
+    local saved, reason = self:SavePreference(key, keybind)
+    if saved then
+        self.sidebarKeybindDown, self.railPeekKeybindDown = true, true
+    end
+    return saved, reason
+end
+
+function BankSession:SetSidebarKeybindPreference(value)
+    return self:SaveSidebarKeybind("sidebarKeybind", value)
+end
+
+function BankSession:SetRailPeekKeybindPreference(value)
+    return self:SaveSidebarKeybind("railPeekKeybind", value)
+end
+
+-- Expand fires once per press; Peek remains visible only while its chord is held.
+function BankSession:CheckSidebarKeybind()
+    local function pressed(key, latch)
+        local binding = self.preferences[key] or {}
+        local down = #binding > 0 and prettyui.KeybindField.IsDown(binding)
+        local edge = down and not self[latch]
+        self[latch] = down
+        return edge, #binding, down
+    end
+    local expandPressed, expandKeys = pressed("sidebarKeybind", "sidebarKeybindDown")
+    local peekPressed, peekKeys, peekDown = pressed("railPeekKeybind", "railPeekKeybindDown")
+    local state = CorePreferences.OpeningState(self.preferences)
+    local usable = not self.shutDown and self.inGame and self.layout.active
+    local peekAllowed = usable and state == "hidden" and self.preferences.railPeekEnabled == true
+    -- Clear an active peek even when input is blocked, settings change, or the bank closes.
+    if self.layout.peekRail and (not peekDown or not peekAllowed) then self.layout:SetRailPeek(false) end
+    if not usable then return end
+    local expandAllowed = state ~= "expanded"
+    local peek = peekAllowed and peekPressed and (not expandPressed or not expandAllowed or peekKeys > expandKeys)
+    if not peek and not (expandAllowed and expandPressed) then return end
+    local ok, open = pcall(bankIsOpen)
+    if not ok or not open then return end
+    local invoked, message = pcall(function()
+        if peek then return self.layout:SetRailPeek(true) end
+        return self.layout:ToggleSidebarExpansion()
+    end)
+    if not invoked then debugLog("Bank Core sidebar keybind failed: ", tostring(message)) end
 end
 
 -- Undo window changes before forgetting them; reconnect on the next bank opening.
@@ -339,17 +455,22 @@ function BankSession:ResetGeometry()
     return true
 end
 
-function BankSession:CreateContentLayer(parent, width, height, closeParent)
+function BankSession:CreateContentLayer(parent, width, height, closeParent, nativeSettings)
     if self.shutDown then return end
     self:DestroyPanel()
     self.panel = CorePanel.new(parent, {
         preferences = self.preferences,
+        nativeSettings = nativeSettings == true,
         width = width, height = height,
         closeParent = closeParent,
         onClose = function() return self.layout:ReturnToBank() end,
         onChangeDebug = function(enabled) return self:SetDebugPreference(enabled) end,
-        onChangeCollapseSidebar = function(enabled) return self:SetCollapseSidebarPreference(enabled) end,
+        onChangeSidebarOpeningState = function(state) return self:SetSidebarOpeningStatePreference(state) end,
+        onChangeRailPeekEnabled = function(enabled) return self:SetRailPeekEnabledPreference(enabled) end,
         onChangeExpansionDirection = function(direction) return self:SetExpansionDirectionPreference(direction) end,
+        onChangeSidebarEdge = function(edge) return self:SetSidebarEdgePreference(edge) end,
+        onChangeSidebarKeybind = function(value) return self:SetSidebarKeybindPreference(value) end,
+        onChangeRailPeekKeybind = function(value) return self:SetRailPeekKeybindPreference(value) end,
         onResetGeometry = function() return self:ResetGeometry() end,
     })
 end

@@ -13,6 +13,7 @@ local BankPageDisplay = require("lib/engine/bank_page_display")
 local CustomView = require("lib/features/extensions/custom_view")
 local PageLayout = require("lib/features/extensions/page_layout")
 
+local CorePreferences = require("lib/core/core_preferences")
 local BankView = {}
 BankView.__index = BankView
 BankWindow.install(BankView)
@@ -35,8 +36,10 @@ function BankView.new(options)
         -- The current custom drawing.
         customView = nil,
         sidebarMode = nil,
-        collapseSidebar = options.collapseSidebar == true,
-        expansionDirection = options.expansionDirection == "evenly" and "evenly" or "left",
+        sidebarOpeningState = CorePreferences.OpeningState(options),
+        peekRail = false,
+        expansionDirection = options.expansionDirection == "evenly" and "evenly" or "edge",
+        sidebarEdge = options.sidebarEdge == "right" and "right" or "left",
         -- Plugin tabs in the player's saved order.
         extensionTabs = {},
         -- The session supplies functions to load and save tab order.

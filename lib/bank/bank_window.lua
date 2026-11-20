@@ -12,6 +12,7 @@ local function report(...)
     if type(log) == "function" then log(...) end
 end
 
+local SidebarLayout = require("lib/bank/sidebar_layout")
 local BankWindow = {}
 
 local COMPONENTS = {
@@ -77,13 +78,24 @@ end
 
 local function sidebarParent(self)
     if not self.detachedSidebar then return self.components.all end
-    return component(id.Component.TOPLEVEL_V2__BANK_LAYER)
-        or component(id.Component.TOPLEVEL_V2__GAME_AREA)
+    local bankLayer = component(id.Component.TOPLEVEL_V2__BANK_LAYER)
+    local gameArea = component(id.Component.TOPLEVEL_V2__GAME_AREA)
+    local function usable(value)
+        return value ~= nil and value.hidden ~= true and value.visibleGlobal ~= false
+            and value.width > 0 and value.height > 0
+    end
+    -- Keep a usable parent through the opening transition instead of rebuilding it.
+    local current = self.sidebarRoot ~= nil and self.sidebarRoot.parent or nil
+    if usable(current) and (current == bankLayer or current == gameArea
+        or tostring(current) == tostring(bankLayer) or tostring(current) == tostring(gameArea)) then return current end
+    if usable(bankLayer) then return bankLayer end
+    if usable(gameArea) then return gameArea end
+    return nil
 end
 
 local function sidebarIsCollapsed(self)
     if self.IsSidebarCollapsed ~= nil then return self:IsSidebarCollapsed() end
-    return self.collapseSidebar == true and self.sidebarMode == nil
+    return self.sidebarOpeningState ~= "expanded" and self.sidebarMode == nil
 end
 
 -- Follow the bank using coordinates in the outer layer.
@@ -94,7 +106,8 @@ function BankWindow:PositionDetachedSidebar()
     local contentWidth = sidebarIsCollapsed(self)
         and (Config.SIDEBAR_TAB_WIDTH + Config.SIDEBAR_TAB_GAP) or Config.SIDEBAR_WIDTH
     local width = contentWidth + Config.CLASSIC_SIDEBAR_LEFT_PADDING
-    self.sidebarRoot:SetPos(x - parentX - width, y - parentY)
+    local sidebarX = self.sidebarEdge == "right" and x + self.components.all.width or x - width
+    self.sidebarRoot:SetPos(sidebarX - parentX, y - parentY)
     self.sidebarRoot:SetSize(width, self.components.all.height)
     if self.sidebarOverlay ~= nil then
         self.sidebarOverlay:SetPos(x - parentX, y - parentY)
@@ -149,10 +162,11 @@ local function round(value)
     return math.floor(value + 0.5)
 end
 
--- Expand left from the fixed right edge, or evenly around the native center.
-local function expansionChanges(parts, width, direction)
+-- Grow toward the chosen edge, or evenly around the native center.
+local function expansionChanges(parts, width, direction, edge)
     local expansionPlan = {}
-    local leftWidth = direction == "evenly" and math.floor(width / 2) or width
+    local leftWidth = SidebarLayout.LeftGrowth(width, direction, edge)
+    local contentOffset = SidebarLayout.BeforeBank(width, edge)
     local function add(slot, value, x, change)
         if value ~= nil then
             expansionPlan[#expansionPlan + 1] = { slot = slot, value = value, x = x, width = change }
@@ -169,7 +183,7 @@ local function expansionChanges(parts, width, direction)
     add("border", parts.border, 0, width)
     for key, value in pairs(parts.overlays) do add("overlay" .. key, value, 0, width) end
     for key, value in pairs(parts.dialogs) do add("dialog" .. key, value, leftWidth, 0) end
-    add("content", parts.content, width, 0)
+    add("content", parts.content, contentOffset, 0)
     add("help", parts.help, width, 0)
     add("close", parts.close, width, 0)
     return expansionPlan
@@ -187,8 +201,8 @@ local function widthChange(value, expansionPlan, depth)
 end
 
 -- Do not add width twice when a control grows with its container.
-local function expandWindow(parts, width, appliedOffsets, direction)
-    local expansionPlan = expansionChanges(parts, width, direction)
+local function expandWindow(parts, width, appliedOffsets, direction, edge)
+    local expansionPlan = expansionChanges(parts, width, direction, edge)
     local plannedOffsets = {}
     for _, change in ipairs(expansionPlan) do
         local partLayout = readPartLayout(change.value)
@@ -426,6 +440,31 @@ function BankWindow:FixBankGeometry()
     return ok
 end
 
+-- Native layout settlement can replace child offsets after immediate attachment.
+local function liveExpansionOffsets(self, record)
+    local savedParts = {}
+    for _, part in ipairs(record ~= nil and record.parts or {}) do savedParts[part.slot] = part end
+    local frame = record ~= nil and findFrameRecord(record) or nil
+    local offsets = {}
+    for _, applied in ipairs(self.expansion or {}) do
+        local x, width = applied.x, applied.width
+        local saved = savedParts[applied.slot]
+        if saved ~= nil and saved ~= frame then
+            local layout = tryReadPartLayout(applied.value)
+            if layout ~= nil then
+                if layout.x ~= saved.expandedX then x = 0 end
+                if layout.width ~= saved.expandedWidth then width = 0 end
+                if x ~= applied.x or width ~= applied.width then
+                    debugLog("Bank Core kept native layout changes for ", applied.slot,
+                        "; removing only offsets still present")
+                end
+            end
+        end
+        offsets[#offsets + 1] = { slot = applied.slot, value = applied.value, x = x, width = width }
+    end
+    return offsets
+end
+
 -- Remove the width Core added, keeping player resizes and the saved changes.
 function BankWindow:RestoreBankWindowSizeAndPosition()
     if self.detachedSidebar then return end
@@ -438,9 +477,9 @@ function BankWindow:RestoreBankWindowSizeAndPosition()
         return
     end
     BankWindow.CaptureFrame(self)
-    local allPartsRestored = undoExpansion(self.expansion or {})
-    self.expansion = nil
     local record = self.windowRecord.value
+    local allPartsRestored = undoExpansion(liveExpansionOffsets(self, record))
+    self.expansion = nil
     if record == nil then return end
     local entry = findFrameRecord(record)
     local partLayout = frameOffsets(entry)
@@ -464,6 +503,7 @@ end
 
 -- Reserve the rail alone when the optional content column is collapsed.
 local function sidebarExpansionWidth(self)
+    if self.IsSidebarHidden ~= nil and self:IsSidebarHidden() then return 0 end
     if sidebarIsCollapsed(self) then
         return Config.SIDEBAR_TAB_WIDTH + Config.SIDEBAR_TAB_GAP
     end
@@ -476,7 +516,7 @@ function BankWindow:WidenBankForSidebar(width)
     width = width or sidebarExpansionWidth(self)
     self.expansion = {}
     self.expansionRecord = nil
-    expandWindow(self.components, width, self.expansion, self.expansionDirection)
+    expandWindow(self.components, width, self.expansion, self.expansionDirection, self.sidebarEdge)
     local record = { sidebarWidth = width, parts = {} }
     for _, entry in ipairs(self.expansion) do
         local partLayout = readPartLayout(entry.value)
@@ -496,8 +536,28 @@ function BankWindow:UpdateSidebarExpansion(force)
     end
     local width = sidebarExpansionWidth(self)
     if not force and self.expansionRecord ~= nil and self.expansionRecord.sidebarWidth == width then return end
+    local anchorX
+    local anchorRatio = SidebarLayout.Anchor(self.expansionDirection, self.sidebarEdge)
+    if not force and self.expansionRecord ~= nil then
+        local frame = self.components.host or self.components.all
+        local x = UICoordinates.absolutePosition(frame)
+        anchorX = x + frame.width * anchorRatio
+    end
     self:RestoreBankWindowSizeAndPosition()
     self:WidenBankForSidebar(width)
+    if anchorX ~= nil then
+        -- The native client can change anchors after our immediate attachment.
+        local frame = self.components.host or self.components.all
+        local x = UICoordinates.absolutePosition(frame)
+        local correction = round(anchorX - x - frame.width * anchorRatio)
+        if correction ~= 0 then
+            offsetPart(frame, correction, 0)
+            local entry = findFrameRecord(self.expansionRecord)
+            entry.expandedX = readPartLayout(frame).x
+            -- Rebase the native position; keep Core's reversible offsets unchanged.
+            debugLog("Bank Core preserved the live window anchor after native layout settlement: ", correction)
+        end
+    end
     self.windowRecord:Save()
     self.lastBankWindowMeasurements = nil
 end
@@ -532,7 +592,8 @@ function BankWindow:WatchBankWindow()
         local record = self.windowRecord.value
         local content = BankInterface.Find(COMPONENTS.content)
         local layout = content ~= nil and tryReadPartLayout(content) or nil
-        if record ~= nil and layout ~= nil and content.hidden ~= true and content.height > 0 then
+        if record ~= nil and record.sidebarWidth > 0 and layout ~= nil
+            and content.hidden ~= true and content.height > 0 then
             for _, entry in ipairs(record.parts) do
                 if entry.slot == "content" and layout.x ~= entry.expandedX then
                     debugLog("Bank Core reapplying saved geometry after a native layout reset")
@@ -589,6 +650,13 @@ function BankWindow:IsReady()
     local border = component(COMPONENTS.border)
     local viewport = component(BANK_ITEMS_CONTAINER_COMPONENT_ID)
     local itemLayer = component(BANK_ITEMS_COMPONENT_ID)
+    local geometry = {}
+    local function sample(value, name)
+        if value == nil then return end
+        geometry[#geometry + 1] = table.concat({ name, tostring(value.x), tostring(value.y),
+            tostring(value.width), tostring(value.height) }, ",")
+    end
+    sample(ui.Interfaces:GetComponent(id.Component.TOPLEVEL_V2__BANK_WINDOW), "host")
     for _, part in ipairs({
         { "ALL (0)", all, true, true },
         { "BACKGROUND_LAYER (1)", backgroundLayer, false, false },
@@ -606,8 +674,11 @@ function BankWindow:IsReady()
                 return false, name .. " height=" .. tostring(value.height)
             end
         end
+        sample(value, name)
     end
-    return true
+    local scale = game and game.options and game.options.InterfaceScale
+    geometry[#geometry + 1] = tostring(scale and scale.setting)
+    return true, nil, table.concat(geometry, "|")
 end
 
 -- Find the bank parts, add sidebar space, and watch window changes
@@ -659,20 +730,21 @@ function BankWindow:IsAttachedToCurrentBank()
     local ok, attached = pcall(function()
         local all = component(COMPONENTS.all)
         local content = component(COMPONENTS.content)
+        local hidden = self.IsSidebarHidden ~= nil and self:IsSidebarHidden()
         return samePart(all, self.components.all) and samePart(content, self.components.content)
             and (self.detachedSidebar == true) == classicUI()
             and samePart(self.sidebarRoot.parent, sidebarParent(self))
             and self.sidebarRoot.width > 0 and self.sidebarRoot.height > 0
-            and self.sidebarRoot.hidden ~= true and self.sidebarRoot.visibleGlobal ~= false
+            and (hidden or (self.sidebarRoot.hidden ~= true and self.sidebarRoot.visibleGlobal ~= false))
     end)
     return ok and attached == true
 end
 
 -- Roll back partial attachment before reporting the original build failure.
-function BankWindow:Apply()
+function BankWindow:Apply(skipReadiness)
     debugLog("Apply entered; active=", self.active)
     if self.active then return true end
-    if not self:IsReady() then return false end
+    if not skipReadiness and not self:IsReady() then return false end
     local ok, result = pcall(applyWindow, self)
     if ok then return result end
     local restored, cleanupError = pcall(function() self:Restore() end)
@@ -764,6 +836,8 @@ function BankWindow:Restore()
     if self.active then step(function() self:RestoreBankWindowSizeAndPosition() end) end
     self.active = false
     self.expanded = false
+    if self.sidebarOpeningState ~= "expanded" then self.sidebarMode = nil end
+    self.peekRail = false
     self.expansionRecord = nil
     self.detachedSidebar = nil
     self.components = {}

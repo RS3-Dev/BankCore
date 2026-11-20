@@ -198,11 +198,14 @@ the rail on the next logic tick, after `Register` returns.
 - A click acts when the press is released. Dragging an icon moves it without
   selecting its column, opening its page or changing the displayed page.
 - An icon with a column selects that column without changing the displayed page.
-  Clicking the selected icon again does nothing.
+  In collapsed opening modes, clicking the selected icon again deselects it and
+  returns to the rail or hidden state. In Expanded mode it remains selected.
 - An icon without a column opens its prepared page or custom view directly.
-- When the bank opens, Core selects the first available icon with a column in
-  the rail's order. Removing the selected extension selects the first remaining
-  column. A newly registered icon never replaces a selected column.
+- Bank opening follows the player's Expanded, Rail only, or Fully collapsed
+  setting. Expanded selects an available column; the collapsed modes start with
+  no plugin selected. Expand Sidebar selects the first icon in the saved order.
+  Peeking reveals only the rail and does not select a plugin. A newly registered
+  icon never replaces an existing selection.
 
 `mount(ctx)` receives `{ parent, overlay, width, height }`. Build controls in
 `parent`, which clips them to the sidebar column. Use the window-sized,
@@ -742,8 +745,9 @@ coordinates, perform a drop itself, or provide plugins with drop callbacks.
   leaves a hovered item for a spot where no page cell, bound item or plugin
   control takes it can reach a bank stack in its own place, as in a page's gaps
   between cells.
-- Core adds 284 interface units for its sidebar and subtracts only its added
-  width and movement when restoring the bank. Player resizes are preserved. It
+- In modern mode, Core adds 0, 40, or 284 interface units for the hidden, rail-only,
+  or expanded sidebar and subtracts only its added width and movement when
+  restoring the bank. Classic mode uses a detached sidebar. Player resizes are preserved. It
   checks window size and position every 10 ticks because native resize events
   have not been verified for this use.
 - A client component can ignore or refuse restoration after it disappears.
@@ -755,8 +759,8 @@ coordinates, perform a drop itself, or provide plugins with drop callbacks.
   subtracts the sidebar width in that case. Native minimum-width behavior and
   changes to anchor values across interface scales also need live verification.
 
-Core's preferences, the debug setting and the rail order, are stored under
-`bankcore:settings:v1`. Its plugin panel contains the debug setting only;
-feature plugins host their own settings. Core
+Core's sidebar preferences, shortcuts, debug setting and rail order are stored under
+`bankcore:settings:v1`. Core settings are available from the rail cog and the
+plugin manager; feature plugins host their own settings. Core
 requires no HTTP permission, performs no network requests, and bundles no client
 assets or PrettyUI source.

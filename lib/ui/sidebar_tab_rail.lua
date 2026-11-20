@@ -51,6 +51,7 @@ function SidebarTabRail.new(parent, options)
         x = options.x,
         y = options.y,
         height = options.height,
+        bottomInset = options.bottomInset,
         onSelect = options.onSelect,
         onReorder = options.onReorder,
         gesture = nil,
@@ -63,7 +64,12 @@ function SidebarTabRail.new(parent, options)
     }, SidebarTabRail)
     self.root = ui.Layer.new(parent)
     self.root:SetPos(self.x, self.y)
-    self.root:SetSize(TAB_SIZE, self.height)
+    if self.bottomInset ~= nil then
+        self.root:SetSize(TAB_SIZE, -self.y - self.bottomInset, 0, 1)
+        self.height = math.max(0, self.root.height)
+    else
+        self.root:SetSize(TAB_SIZE, self.height)
+    end
     self.root.clickthrough = false
     -- Draw tooltips outside the icon strip so they are not cut off.
     local tooltipParent = options.tooltipParent or parent
@@ -71,7 +77,7 @@ function SidebarTabRail.new(parent, options)
         return UICoordinates.relativePosition(target, parent)
     end)
     self.background = ui.Sprite.new(self.root)
-    self.background:SetSize(TAB_SIZE, self.height)
+    self.background:SetSize(0, 0, 1, 1)
     self.background.spriteID = BACKDROP_SPRITE
     self.background.isTiling = true
     self.background.clickthrough = true
@@ -80,11 +86,11 @@ end
 
 -- End any press or drag before resizing.
 function SidebarTabRail:SetHeight(height)
+    if self.bottomInset ~= nil then height = math.max(0, self.root.height) end
     if height == self.height then return end
     self:StopGesture()
     self.height = height
-    self.root:SetSize(TAB_SIZE, height)
-    self.background:SetSize(TAB_SIZE, height)
+    if self.bottomInset == nil then self.root:SetSize(TAB_SIZE, height) end
     -- Redraw because arrow positions depend on height.
     self.signature = nil
     self:SetTabs(self.tabs, self.activeID)
