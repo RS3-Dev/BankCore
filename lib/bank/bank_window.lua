@@ -53,11 +53,6 @@ local ALL_TAB_UNSELECTED_SPRITE_ID = id.Sprite.BANK_TABS_HORIZONTAL_0
 -- The game has no window move or resize events.
 local BANK_WINDOW_CHECK_TICKS = 10
 
--- Round down to keep expansion on whole pixels.
-local function halfWidth(value)
-    return math.floor(value / 2)
-end
-
 local component = BankInterface.Get
 
 local function interfaceMode()
@@ -154,9 +149,10 @@ local function round(value)
     return math.floor(value + 0.5)
 end
 
--- Widen the bank, keeping right-edge controls aligned and dialogs centred.
-local function expansionChanges(parts, width)
-    local expansionPlan, halfAddedWidth = {}, halfWidth(width)
+-- Expand left from the fixed right edge, or evenly around the native center.
+local function expansionChanges(parts, width, direction)
+    local expansionPlan = {}
+    local leftWidth = direction == "evenly" and math.floor(width / 2) or width
     local function add(slot, value, x, change)
         if value ~= nil then
             expansionPlan[#expansionPlan + 1] = { slot = slot, value = value, x = x, width = change }
@@ -164,15 +160,15 @@ local function expansionChanges(parts, width)
     end
     -- Move the outer frame if present; otherwise move the bank window itself.
     if parts.host ~= nil and not samePart(parts.host, parts.all) then
-        add("host", parts.host, -halfAddedWidth, width)
+        add("host", parts.host, -leftWidth, width)
         add("all", parts.all, 0, width)
     else
-        add("all", parts.all, -halfAddedWidth, width)
+        add("all", parts.all, -leftWidth, width)
     end
     add("background", parts.background, 0, width)
     add("border", parts.border, 0, width)
     for key, value in pairs(parts.overlays) do add("overlay" .. key, value, 0, width) end
-    for key, value in pairs(parts.dialogs) do add("dialog" .. key, value, halfAddedWidth, 0) end
+    for key, value in pairs(parts.dialogs) do add("dialog" .. key, value, leftWidth, 0) end
     add("content", parts.content, width, 0)
     add("help", parts.help, width, 0)
     add("close", parts.close, width, 0)
@@ -191,8 +187,8 @@ local function widthChange(value, expansionPlan, depth)
 end
 
 -- Do not add width twice when a control grows with its container.
-local function expandWindow(parts, width, appliedOffsets)
-    local expansionPlan = expansionChanges(parts, width)
+local function expandWindow(parts, width, appliedOffsets, direction)
+    local expansionPlan = expansionChanges(parts, width, direction)
     local plannedOffsets = {}
     for _, change in ipairs(expansionPlan) do
         local partLayout = readPartLayout(change.value)
@@ -480,7 +476,7 @@ function BankWindow:WidenBankForSidebar(width)
     width = width or sidebarExpansionWidth(self)
     self.expansion = {}
     self.expansionRecord = nil
-    expandWindow(self.components, width, self.expansion)
+    expandWindow(self.components, width, self.expansion, self.expansionDirection)
     local record = { sidebarWidth = width, parts = {} }
     for _, entry in ipairs(self.expansion) do
         local partLayout = readPartLayout(entry.value)
@@ -492,14 +488,14 @@ function BankWindow:WidenBankForSidebar(width)
 end
 
 -- Replace only Core's added width, keeping the player's native window size.
-function BankWindow:UpdateSidebarExpansion()
+function BankWindow:UpdateSidebarExpansion(force)
     if self.detachedSidebar then
         self:PositionDetachedSidebar()
         self.lastBankWindowMeasurements = nil
         return
     end
     local width = sidebarExpansionWidth(self)
-    if self.expansionRecord ~= nil and self.expansionRecord.sidebarWidth == width then return end
+    if not force and self.expansionRecord ~= nil and self.expansionRecord.sidebarWidth == width then return end
     self:RestoreBankWindowSizeAndPosition()
     self:WidenBankForSidebar(width)
     self.windowRecord:Save()
