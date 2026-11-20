@@ -6,7 +6,7 @@ local Theme = require("lib/ui/theme")
 local CorePanel = {}
 CorePanel.__index = CorePanel
 
-local CONTENT_HEIGHT = 516
+local CONTENT_HEIGHT = 552
 CorePanel.CONTENT_HEIGHT = CONTENT_HEIGHT
 local TEXT_COLOUR = 0xD7C9ADFF
 
@@ -29,6 +29,7 @@ function CorePanel.new(parent, options)
         options = options or {},
         enableDebug = preferences.enableDebug == true,
         collapseSidebar = preferences.collapseSidebar == true,
+        startSidebarCollapsed = preferences.startSidebarCollapsed == true,
         expansionDirection = preferences.expansionDirection == "evenly" and "evenly" or "left",
         destroyed = false,
     }, CorePanel)
@@ -58,7 +59,7 @@ function CorePanel.new(parent, options)
         spriteName = "RS3_BTN_MODAL_WINDOW_1_CLOSE_NML", tooltip = "Close settings" })
     self.generalHeading, self.generalDivider = sectionHeading(content, "General settings", x, 58, width)
     self.collapseToggle = prettyui.CheckboxButton.new(content, {
-        { text = "Collapse sidebar when no plugin is selected", value = "collapseSidebar",
+        { text = "Collapse sidebar with no plugin selected", value = "collapseSidebar",
             tooltip = "Click the selected plugin icon again to leave only the icon rail" },
     }, {
         x = x, y = 96, width = width, colour = TEXT_COLOUR, selectionCursor = false,
@@ -68,8 +69,19 @@ function CorePanel.new(parent, options)
     for _, option in ipairs(self.collapseToggle.items or {}) do
         option.label.font = id.Font.MUSEO_SANS_11PT_REGULAR
     end
+    self.startCollapsedToggle = prettyui.CheckboxButton.new(content, {
+        { text = "Start with sidebar collapsed", value = "startSidebarCollapsed",
+            tooltip = "Clear the selected plugin when the bank closes. Open the bank with only the icon rail." },
+    }, {
+        x = x, y = 132, width = width, colour = TEXT_COLOUR, selectionCursor = false,
+        selectedValues = self.startSidebarCollapsed and { "startSidebarCollapsed" } or {},
+        onChange = function(group) self:ChangeStartSidebarCollapsed(group:IsSelected("startSidebarCollapsed")) end,
+    })
+    for _, option in ipairs(self.startCollapsedToggle.items or {}) do
+        option.label.font = id.Font.MUSEO_SANS_11PT_REGULAR
+    end
     self.expansionLabel = prettyui.Text.new(content, {
-        text = "Sidebar expansion (modern interface)", x = x, y = 132,
+        text = "Sidebar expansion (modern interface)", x = x, y = 168,
         width = width, height = 20, colour = TEXT_COLOUR,
         font = id.Font.MUSEO_SANS_11PT_REGULAR,
     })
@@ -77,7 +89,7 @@ function CorePanel.new(parent, options)
         { text = "Left", value = "left", tooltip = "Keep the bank fixed and expand the sidebar to the left" },
         { text = "Evenly", value = "evenly", tooltip = "Expand evenly on both sides of the bank" },
     }, {
-        x = x, y = 158, width = width, inline = true,
+        x = x, y = 194, width = width, inline = true,
         colour = TEXT_COLOUR, selectionCursor = false,
         selectedValues = { self.expansionDirection },
         onChange = function(_, _, value, selected)
@@ -89,7 +101,7 @@ function CorePanel.new(parent, options)
         option.label.font = id.Font.MUSEO_SANS_11PT_REGULAR
     end
     -- Keep developer tools near the bottom, with scrolling room on short windows.
-    local developerY = math.max(224, self.contentHeight - 292)
+    local developerY = math.max(260, self.contentHeight - 292)
     self.developerHeading, self.developerDivider = sectionHeading(content, "Developer settings", x, developerY, width)
     self.debugToggle = prettyui.CheckboxButton.new(content, {
         { text = "Enable debug", value = "enableDebug",
@@ -176,6 +188,19 @@ function CorePanel:ChangeCollapseSidebar(enabled)
     return saved, reason
 end
 
+-- Restore the checkbox if saving the startup preference fails.
+function CorePanel:ChangeStartSidebarCollapsed(enabled)
+    if self.destroyed then return false end
+    local saved, reason = self.options.onChangeStartSidebarCollapsed(enabled)
+    if saved then
+        self.startSidebarCollapsed = enabled
+    else
+        self.startCollapsedToggle:SetSelected("startSidebarCollapsed", self.startSidebarCollapsed, false)
+    end
+    self:ShowResult(saved, reason, "Could not save the setting.")
+    return saved, reason
+end
+
 function CorePanel:ChangeExpansionDirection(direction)
     if self.destroyed then return false end
     local saved, reason = self.options.onChangeExpansionDirection(direction)
@@ -194,6 +219,7 @@ function CorePanel:Destroy()
     self.closeButton:Destroy()
     self.debugToggle:Destroy()
     self.collapseToggle:Destroy()
+    self.startCollapsedToggle:Destroy()
     self.expansionToggle:Destroy()
     self.resetGeometry:Destroy()
     self.view:Destroy()

@@ -764,6 +764,7 @@ function BankWindow:Restore()
     if self.active then step(function() self:RestoreBankWindowSizeAndPosition() end) end
     self.active = false
     self.expanded = false
+    if self.startSidebarCollapsed then self.sidebarMode = nil end
     self.expansionRecord = nil
     self.detachedSidebar = nil
     self.components = {}

@@ -87,8 +87,14 @@ function SidebarFrame.Create(bankView, parent, height, x, y, actions)
         local endTile = sprite(bankView.sidebarHeader, id.Sprite.RS3_MODAL_WINDOW_1_TOP_TILE,
             -64, 0, 64, CLASSIC_TITLE_SPRITE_HEIGHT)
         endTile:SetPos(-64, 0, 1, 0)
-        bankView.sidebarCollapsedHeader = sprite(bankView.sidebarRoot,
-            id.Sprite.RS3_MODAL_WINDOW_1_TITLE_CORNER, 0, 0, 0, CLASSIC_TITLE_SPRITE_HEIGHT, 1, 0)
+        -- Keep the corner bevel at its normal width when only the rail is visible.
+        bankView.sidebarCollapsedHeader = ui.Layer.new(bankView.sidebarRoot)
+        bankView.sidebarCollapsedHeader:SetSize(0, CLASSIC_TITLE_SPRITE_HEIGHT, 1, 0)
+        bankView.sidebarCollapsedHeader.clickthrough = true
+        sprite(bankView.sidebarCollapsedHeader, id.Sprite.RS3_MODAL_WINDOW_1_TITLE_CORNER,
+            0, 0, 28, CLASSIC_TITLE_SPRITE_HEIGHT)
+        sprite(bankView.sidebarCollapsedHeader, id.Sprite.RS3_MODAL_WINDOW_1_TOP_TILE,
+            28, 0, -28, CLASSIC_TITLE_SPRITE_HEIGHT, 1, 0)
         bankView.sidebarCollapsedHeader.hidden = true
         -- Stretch every title section equally so their bottom borders meet.
         bankView.sidebarTitle = prettyui.Text.new(bankView.sidebarHeader, {

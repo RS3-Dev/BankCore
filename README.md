@@ -63,16 +63,18 @@ icon without opening a sidebar, and clicking their icon again closes the page.
 Settings include **Enable debug**, which writes diagnostics to
 the client log, and **Reset geometry**, which clears Core's saved bank window
 adjustments. After resetting, close and reopen the bank to measure a fresh layout.
-**Collapse sidebar when no plugin is selected** keeps only the icon rail visible
+**Collapse sidebar with no plugin selected** keeps only the icon rail visible
 until you choose a plugin. Click the selected plugin icon again to deselect it
-and collapse its column. This preference is saved and is off by default; the
+and collapse its column. This preference is saved and is on by default; the
 settings cog remains available while collapsed. The collapse preference is under
 **General settings**; debug logging and geometry recovery are under
 **Developer settings**, with instructions for repositioning and resetting the bank.
+**Start with sidebar collapsed**, also under General settings, clears the selected
+plugin when the bank closes so each opening starts with only the icon rail.
+It is saved separately and is on by default.
 **Sidebar expansion**, under General settings, offers **Left** (the default) to
 keep the modern bank content fixed, or **Evenly** to expand around its center.
-The linked checkboxes always keep one option selected. The choice applies
-immediately and does not change the detached classic layout.
+The choice applies immediately and does not change the detached classic layout.
 Leave debug off during normal play. Feature plugins have their own settings.
 Banking Tweaks supplies modifier-click options.
 

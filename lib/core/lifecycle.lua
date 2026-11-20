@@ -14,6 +14,7 @@ local BANK_CLOSE_EVENT = Config.CORE_REF .. "_bank_close"
 local BANK_UPDATE_EVENT = Config.CORE_REF .. "_bank_update"
 local GAME_STATE_EVENT = Config.CORE_REF .. "_game_state"
 local BANK_VISIBILITY_EVENT = Config.CORE_REF .. "_bank_visibility"
+local BANK_DRAW_VISIBILITY_EVENT = Config.CORE_REF .. "_bank_draw_visibility"
 local BANK_VAR_EVENT = Config.CORE_REF .. "_bank_var"
 local BANK_TRANSITION_EVENT = Config.CORE_REF .. "_bank_transition"
 
@@ -103,11 +104,24 @@ function Lifecycle:Start()
     local bankWasOpen, lastVisibilityReason = readBankVisibility()
     debugLog("initial bank open=", bankWasOpen, "; reason=", lastVisibilityReason)
     if bankWasOpen then session:BeginLayoutRetry() end
+    -- Detached classic controls do not inherit the native bank's visibility.
+    Event.Draw.Subscribe(BANK_DRAW_VISIBILITY_EVENT, function()
+        local layout = session.layout
+        if layout == nil or not layout.active or not layout.detachedSidebar then return end
+        local open = readBankVisibility()
+        if open then return end
+        for _, name in ipairs({ "sidebarRoot", "sidebarOverlay", "sidebarTooltipOverlay" }) do
+            local layer = layout[name]
+            if layer ~= nil then pcall(function() layer.hidden = true end) end
+        end
+    end)
     -- Returning from a bank dialog may not add the inventory again.
     local visibilityTicks = 0
     Event.Logic.Subscribe(BANK_VISIBILITY_EVENT, function()
         visibilityTicks = visibilityTicks + 1
-        if visibilityTicks < 10 then return end
+        local layout = session.layout
+        local classicActive = layout ~= nil and layout.active and layout.detachedSidebar
+        if visibilityTicks < 10 and not classicActive then return end
         visibilityTicks = 0
         local bankOpen, reason = readBankVisibility()
         if reason ~= lastVisibilityReason then
@@ -122,6 +136,8 @@ function Lifecycle:Start()
                 else
                     session:RetryLayoutWhenReady()
                 end
+            elseif session.layout.active then
+                session:CloseBank()
             end
             return
         end
@@ -161,6 +177,7 @@ function Lifecycle:Shutdown()
     Event.VarTransmit.Unsubscribe(BANK_VAR_EVENT)
     Event.Logic.Unsubscribe(BANK_TRANSITION_EVENT)
     Event.Logic.Unsubscribe(BANK_VISIBILITY_EVENT)
+    Event.Draw.Unsubscribe(BANK_DRAW_VISIBILITY_EVENT)
     session:StopFilterSettle()
     session:StopLayoutRetry()
 

@@ -8,7 +8,7 @@ local MAX_RAIL_ORDER = 64
 local ID_LENGTH = 64
 
 function CorePreferences.defaults()
-    return { enableDebug = false, collapseSidebar = false,
+    return { enableDebug = false, collapseSidebar = true, startSidebarCollapsed = true,
         expansionDirection = "left", railOrder = {} }
 end
 
@@ -35,6 +35,7 @@ function CorePreferences.load()
     if not ok or type(saved) ~= "table" then return value end
     if type(saved.enableDebug) == "boolean" then value.enableDebug = saved.enableDebug end
     if type(saved.collapseSidebar) == "boolean" then value.collapseSidebar = saved.collapseSidebar end
+    if type(saved.startSidebarCollapsed) == "boolean" then value.startSidebarCollapsed = saved.startSidebarCollapsed end
     if saved.expansionDirection == "left" or saved.expansionDirection == "evenly" then
         value.expansionDirection = saved.expansionDirection
     end
@@ -46,6 +47,7 @@ function CorePreferences.save(value)
     local ok, saved = pcall(function()
         return PersistentDB:SetStructuredData(Config.PREFERENCES_KEY,
             { enableDebug = value.enableDebug == true, collapseSidebar = value.collapseSidebar == true,
+                startSidebarCollapsed = value.startSidebarCollapsed == true,
                 expansionDirection = value.expansionDirection == "evenly" and "evenly" or "left",
                 railOrder = value.railOrder })
     end)

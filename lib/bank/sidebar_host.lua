@@ -215,13 +215,15 @@ function SidebarHost:IsSidebarCollapsed()
     if self.sidebarMode == SETTINGS_MODE then return true end
     local selected = self:FindSidebarTab(self.sidebarMode)
     if selected ~= nil and selected.mount == nil then return true end
-    return self.collapseSidebar == true and self.sidebarMode == nil
+    return (self.collapseSidebar == true or self.startSidebarCollapsed == true) and self.sidebarMode == nil
 end
 
 -- Apply the preference immediately while preserving the current selection.
 function SidebarHost:SetCollapseSidebar(enabled)
     self.collapseSidebar = enabled == true
-    if not self.collapseSidebar and self.sidebarMode == nil then self.sidebarMode = self:FirstSidebarTab() end
+    if not self.collapseSidebar and not self.startSidebarCollapsed and self.sidebarMode == nil then
+        self.sidebarMode = self:FirstSidebarTab()
+    end
     self:RefreshSidebar()
     self:UpdateLayoutControls()
     self:Changed(false)
@@ -249,7 +251,9 @@ function SidebarHost:SetSidebarMode(selectedTabID)
     if tab ~= nil and self.shownPage == self.settingsPage and self.settingsPage ~= nil then
         if not self:ReturnToBank() then return end
     end
-    if tab == nil and not self.collapseSidebar and not deselected then selectedTabID = self:FirstSidebarTab() end
+    if tab == nil and not self.collapseSidebar and not self.startSidebarCollapsed and not deselected then
+        selectedTabID = self:FirstSidebarTab()
+    end
     if self.sidebarMode == selectedTabID then
         self:UpdateLayoutControls()
         return
@@ -265,7 +269,7 @@ function SidebarHost:SetExtensionTabs(tabs)
     self.extensionTabs = sortByRailOrder(tabs, self.readRailOrder())
     local selected = self:FindSidebarTab(self.sidebarMode)
     if selected == nil and self.sidebarMode ~= SETTINGS_MODE then
-        self.sidebarMode = not self.collapseSidebar and self:FirstSidebarTab() or nil
+        self.sidebarMode = not self.collapseSidebar and not self.startSidebarCollapsed and self:FirstSidebarTab() or nil
     end
     self:UpdateLayoutControls()
     self:RefreshSidebar()

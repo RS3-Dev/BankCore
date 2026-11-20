@@ -124,6 +124,7 @@ function BankSession.new(options)
     }, BankSession)
     session.layout = BankView.new({
         collapseSidebar = session.preferences.collapseSidebar,
+        startSidebarCollapsed = session.preferences.startSidebarCollapsed,
         expansionDirection = session.preferences.expansionDirection,
         windowRecord = options.windowRecord or BankWindowRecord.load(),
         readRailOrder = function() return session.preferences.railOrder end,
@@ -316,6 +317,14 @@ function BankSession:SetCollapseSidebarPreference(enabled)
     return true
 end
 
+-- Apply this preference on the next bank opening without changing the current selection.
+function BankSession:SetStartSidebarCollapsedPreference(enabled)
+    local saved, reason = self:SavePreference("startSidebarCollapsed", enabled == true)
+    if not saved then return false, reason end
+    self.layout.startSidebarCollapsed = enabled == true
+    return true
+end
+
 function BankSession:SetExpansionDirectionPreference(direction)
     if direction ~= "left" and direction ~= "evenly" then return false, "Choose Left or Evenly." end
     local saved, reason = self:SavePreference("expansionDirection", direction)
@@ -349,6 +358,7 @@ function BankSession:CreateContentLayer(parent, width, height, closeParent)
         onClose = function() return self.layout:ReturnToBank() end,
         onChangeDebug = function(enabled) return self:SetDebugPreference(enabled) end,
         onChangeCollapseSidebar = function(enabled) return self:SetCollapseSidebarPreference(enabled) end,
+        onChangeStartSidebarCollapsed = function(enabled) return self:SetStartSidebarCollapsedPreference(enabled) end,
         onChangeExpansionDirection = function(direction) return self:SetExpansionDirectionPreference(direction) end,
         onResetGeometry = function() return self:ResetGeometry() end,
     })
