@@ -1,6 +1,6 @@
 # Bank Core API
 
-This reference describes the API shipped with Core 1.1.2. Dependent plugins use
+This reference describes the current Core runtime API. Dependent plugins use
 the API returned by `bankcore`; Core's Lua modules are private to its runtime.
 The [examples](../examples/README.md) show complete, independently loaded plugins.
 
@@ -127,6 +127,8 @@ local ext, reason, detail = bankcore.Register({
         unmount = function() end,
     },
     customView = function(view) end,
+    onSelect = function() end,
+    onDeselect = function() end,
     onClose = function() end,
     onBankItems = function() end,
     onBankClose = function() end,
@@ -150,7 +152,7 @@ local ext, reason, detail = bankcore.Register({
 - `allowNativeDrag`: optional boolean, default `false`. Sets the drag behavior
   for the extension's pages and custom view. A `SetPage` description can override
   it with an explicit `true` or `false` for that page.
-- `onClose`, `onBankItems`, `onBankClose`, `onBankStateChanged`: optional functions
+- `onSelect`, `onDeselect`, `onClose`, `onBankItems`, `onBankClose`, `onBankStateChanged`: optional functions
   described below.
 
 Extra fields and incorrect types are refused. Registration returns `invalid`
@@ -583,10 +585,36 @@ native item area if no page is open. It returns nil while closed or attaching.
 ## Callbacks
 
 Callbacks normally run on the next logic tick, after the
-change has finished. Each extension receives at most one of each pending notice,
+change has finished. Selection changes are delivered first, with the old plugin's
+`onDeselect()` before the new plugin's `onSelect()`. Other pending notices follow
 in this order: bank close, page close, bank state changed, items changed. Extensions are notified in
 ID order, whatever the rail order. Errors are logged without stopping other
 plugins' callbacks.
+
+- `onSelect()`: this extension becomes the selected sidebar icon while the bank
+  is open. This includes automatic selection on bank opening and icons without
+  a sidebar column. It does not mean the extension's bank page is open.
+- `onDeselect()`: an extension that received `onSelect()` is no longer selected,
+  including switching plugins, opening Core settings, deselecting its icon, or
+  closing the bank. It also runs immediately during disposal, replacement, or
+  Core suspension so the plugin can remove bank-wide controls before teardown.
+  Mount resizing/rebuilding alone does not trigger selection hooks. Changes
+  within one logic tick coalesce to the final selection.
+
+Both hooks take no arguments. Use them for plugin-owned UI or state tied to the
+rail selection; keep column control construction in `mount`/`unmount`. A plugin
+without an icon is never selected and does not receive these hooks.
+
+```lua
+local ext = bankcore.Register({
+    id = "example.overlay", name = "Overlay", icon = "STAR",
+    column = { mount = function(ctx) buildSidebar(ctx) end },
+    onSelect = function() showBankOverlay() end,
+    onDeselect = function() hideBankOverlay() end,
+})
+```
+
+The other callbacks are:
 
 - `onBankClose()`: the bank Core attached to closed or the player left the game.
   Use it to close plugin windows tied to that bank opening. A native tab change,
@@ -646,7 +674,8 @@ local ext = bankcore.Register({
 local state = ext:GetBankState()
 ```
 
-Disposed or replaced extensions receive no later callbacks. During Core
+Disposed or replaced extensions receive no later callbacks after their final
+`onDeselect()` cleanup, if selected. During Core
 shutdown there is no later tick: page-close and bank-close callbacks run
 immediately where applicable, after Core has suspended bank access. Registrations
 remain available for the next Core session unless their plugins dispose them.
