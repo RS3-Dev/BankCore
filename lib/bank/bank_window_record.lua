@@ -31,7 +31,7 @@ end
 
 -- Reject invalid records or records missing the window frame.
 local function readRecord(value)
-    if type(value) ~= "table" or not isOffset(value.sidebarWidth) or value.sidebarWidth <= 0
+    if type(value) ~= "table" or not isOffset(value.sidebarWidth) or value.sidebarWidth < 0
         or type(value.parts) ~= "table" or #value.parts > MAX_PARTS then
         return nil
     end

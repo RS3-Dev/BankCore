@@ -17,6 +17,8 @@ local BANK_VISIBILITY_EVENT = Config.CORE_REF .. "_bank_visibility"
 local BANK_DRAW_VISIBILITY_EVENT = Config.CORE_REF .. "_bank_draw_visibility"
 local BANK_VAR_EVENT = Config.CORE_REF .. "_bank_var"
 local BANK_TRANSITION_EVENT = Config.CORE_REF .. "_bank_transition"
+local SETTINGS_EVENT = Config.CORE_REF .. "_settings"
+local BANK_KEYBIND_EVENT = Config.CORE_REF .. "_sidebar_keybind"
 
 function Lifecycle.new(session, options)
     return setmetatable({
@@ -28,6 +30,10 @@ end
 function Lifecycle:Start()
     local session = self.session
     local options = self.options
+    Event.Logic.Subscribe(BANK_KEYBIND_EVENT, function() session:CheckSidebarKeybind() end)
+    Event.SettingsLayerReady.Subscribe(SETTINGS_EVENT, function(event)
+        session:CreateContentLayer(event.component, nil, nil, nil, true)
+    end)
 
     Event.GameStateChanged.Subscribe(GAME_STATE_EVENT, function(event)
         if event.newState == GameState.GAME then
@@ -63,7 +69,7 @@ function Lifecycle:Start()
 
     Event.InventoryAdded.Subscribe(BANK_OPEN_EVENT, function(event)
         if session.inGame and options.isBankInventoryEvent(event) then
-            session:BeginLayoutRetry()
+            session:AttachFromInventory()
         end
     end)
     Event.InventoryRemoved.Subscribe(BANK_CLOSE_EVENT, function(event)
@@ -109,10 +115,10 @@ function Lifecycle:Start()
         local layout = session.layout
         if layout == nil or not layout.active or not layout.detachedSidebar then return end
         local open = readBankVisibility()
-        if open then return end
+        local hidden = layout.IsSidebarHidden ~= nil and layout:IsSidebarHidden()
         for _, name in ipairs({ "sidebarRoot", "sidebarOverlay", "sidebarTooltipOverlay" }) do
             local layer = layout[name]
-            if layer ~= nil then pcall(function() layer.hidden = true end) end
+            if layer ~= nil then pcall(function() layer.hidden = not open or hidden end) end
         end
     end)
     -- Returning from a bank dialog may not add the inventory again.
@@ -121,7 +127,8 @@ function Lifecycle:Start()
         visibilityTicks = visibilityTicks + 1
         local layout = session.layout
         local classicActive = layout ~= nil and layout.active and layout.detachedSidebar
-        if visibilityTicks < 10 and not classicActive then return end
+        local waitingForBank = session.inGame and layout ~= nil and not layout.active
+        if visibilityTicks < 10 and not classicActive and not waitingForBank then return end
         visibilityTicks = 0
         local bankOpen, reason = readBankVisibility()
         if reason ~= lastVisibilityReason then
@@ -177,6 +184,8 @@ function Lifecycle:Shutdown()
     Event.VarTransmit.Unsubscribe(BANK_VAR_EVENT)
     Event.Logic.Unsubscribe(BANK_TRANSITION_EVENT)
     Event.Logic.Unsubscribe(BANK_VISIBILITY_EVENT)
+    Event.Logic.Unsubscribe(BANK_KEYBIND_EVENT)
+    Event.SettingsLayerReady.Unsubscribe(SETTINGS_EVENT)
     Event.Draw.Unsubscribe(BANK_DRAW_VISIBILITY_EVENT)
     session:StopFilterSettle()
     session:StopLayoutRetry()

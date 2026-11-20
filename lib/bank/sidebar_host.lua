@@ -89,7 +89,7 @@ end
 
 function SidebarHost:TabMountBounds()
     return { x = 1, y = 1, width = Config.SIDEBAR_COLUMN_WIDTH - 10,
-        height = math.max(0, SidebarFrame.ContentHeight(self.sidebarHeight) - 2) }
+        height = math.max(0, self.rail.height - 2) }
 end
 
 -- Show the selected content or explain why it is unavailable.
@@ -194,7 +194,7 @@ function SidebarHost:UpdateLayoutControls()
         self.sidebarMode = nil
     end
     if self.active and self.expanded then self:UpdateSidebarExpansion() end
-    SidebarFrame.SetCollapsed(self, self:IsSidebarCollapsed())
+    SidebarFrame.SetCollapsed(self, self:IsSidebarCollapsed(), self:IsSidebarHidden())
     if self.settingsButton ~= nil then
         self.settingsButton.active = self.settingsPage ~= nil and self.shownPage == self.settingsPage
         self.settingsButton:_UpdateState()
@@ -210,23 +210,62 @@ function SidebarHost:UpdateLayoutControls()
     self.tabRail:SetTabs(self.extensionTabs, self.sidebarMode)
 end
 
--- Settings and plugins without sidebar content only need the icon rail.
-function SidebarHost:IsSidebarCollapsed()
-    if self.sidebarMode == SETTINGS_MODE then return true end
-    local selected = self:FindSidebarTab(self.sidebarMode)
-    if selected ~= nil and selected.mount == nil then return true end
-    return (self.collapseSidebar == true or self.startSidebarCollapsed == true) and self.sidebarMode == nil
+-- Fully collapsed means neither the column nor the icon rail is visible.
+function SidebarHost:IsSidebarHidden()
+    return self.sidebarOpeningState == "hidden" and self.sidebarMode == nil and not self.peekRail
 end
 
--- Apply the preference immediately while preserving the current selection.
-function SidebarHost:SetCollapseSidebar(enabled)
-    self.collapseSidebar = enabled == true
-    if not self.collapseSidebar and not self.startSidebarCollapsed and self.sidebarMode == nil then
-        self.sidebarMode = self:FirstSidebarTab()
-    end
+function SidebarHost:SetSidebarOpeningState(state)
+    self.sidebarOpeningState = state
+    self.peekRail = false
+    if not self.active and state ~= "expanded" then self.sidebarMode = nil end
+    if state == "expanded" and self.sidebarMode == nil then self.sidebarMode = self:FirstSidebarTab() end
     self:RefreshSidebar()
     self:UpdateLayoutControls()
     self:Changed(false)
+end
+
+-- Releasing a peek hides the rail unless a plugin or settings has been selected.
+function SidebarHost:SetRailPeek(reveal)
+    reveal = reveal == true
+    if reveal and (not self.active or self.pageTransitions > 0 or self.sidebarOpeningState ~= "hidden") then return false end
+    if self.peekRail == reveal then return true end
+    self.peekRail = reveal
+    self:RefreshSidebar()
+    self:UpdateLayoutControls()
+    self:Changed(false)
+    return true
+end
+
+-- Keep the reserved column while settings are open in fully expanded mode.
+function SidebarHost:IsSidebarCollapsed()
+    if self.sidebarMode == SETTINGS_MODE then
+        return self.sidebarOpeningState ~= "expanded"
+    end
+    local selected = self:FindSidebarTab(self.sidebarMode)
+    if selected ~= nil and selected.mount == nil then return true end
+    return (self.sidebarOpeningState ~= "expanded") and self.sidebarMode == nil
+end
+
+-- Use saved rail order without toggling an already-selected first plugin off.
+function SidebarHost:SelectFirstSidebarTab()
+    if not self.active or self.pageTransitions > 0 then return false end
+    local first = self.extensionTabs[1]
+    if first == nil then return false end
+    if self.sidebarMode ~= first.id then self:SetSidebarMode(first.id) end
+    return self.sidebarMode == first.id
+end
+
+-- The expand shortcut also returns any selected plugin to the configured collapsed state.
+function SidebarHost:ToggleSidebarExpansion()
+    if not self.active or self.pageTransitions > 0 or self.sidebarOpeningState == "expanded" then return false end
+    if self:FindSidebarTab(self.sidebarMode) == nil then return self:SelectFirstSidebarTab() end
+    if self.shownPage ~= nil and not self:ReturnToBank() then return false end
+    self.sidebarMode, self.peekRail = nil, false
+    self:RefreshSidebar()
+    self:UpdateLayoutControls()
+    self:Changed(false)
+    return true
 end
 
 -- Show the sidebar content, or open the page if there is none.
@@ -234,7 +273,7 @@ function SidebarHost:SetSidebarMode(selectedTabID)
     if self.pageTransitions > 0 then return end
     local tab = self:FindSidebarTab(selectedTabID)
     local deselected = false
-    if tab ~= nil and self.sidebarMode == selectedTabID and (self.collapseSidebar or tab.mount == nil) then
+    if tab ~= nil and self.sidebarMode == selectedTabID and (self.sidebarOpeningState ~= "expanded" or tab.mount == nil) then
         local page = self.shownPage
         if page ~= nil and page.owner.id == tab.extensionID and not self:ReturnToBank() then return end
         selectedTabID, tab = nil, nil
@@ -251,7 +290,7 @@ function SidebarHost:SetSidebarMode(selectedTabID)
     if tab ~= nil and self.shownPage == self.settingsPage and self.settingsPage ~= nil then
         if not self:ReturnToBank() then return end
     end
-    if tab == nil and not self.collapseSidebar and not self.startSidebarCollapsed and not deselected then
+    if tab == nil and self.sidebarOpeningState == "expanded" and not deselected then
         selectedTabID = self:FirstSidebarTab()
     end
     if self.sidebarMode == selectedTabID then
@@ -269,7 +308,7 @@ function SidebarHost:SetExtensionTabs(tabs)
     self.extensionTabs = sortByRailOrder(tabs, self.readRailOrder())
     local selected = self:FindSidebarTab(self.sidebarMode)
     if selected == nil and self.sidebarMode ~= SETTINGS_MODE then
-        self.sidebarMode = not self.collapseSidebar and not self.startSidebarCollapsed and self:FirstSidebarTab() or nil
+        self.sidebarMode = self.sidebarOpeningState == "expanded" and self:FirstSidebarTab() or nil
     end
     self:UpdateLayoutControls()
     self:RefreshSidebar()
