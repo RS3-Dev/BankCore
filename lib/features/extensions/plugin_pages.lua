@@ -17,19 +17,27 @@ local REFRESH_EVENT = Config.CORE_REF .. "_extension_refresh"
 local NOTIFY_EVENT = Config.CORE_REF .. "_extension_notify"
 local REGISTRATION_FIELDS = { id = true, name = true, icon = true, column = true, customView = true, allowNativeDrag = true,
     alwaysShowScrollbar = true,
-    onClose = true, onBankItems = true, onBankClose = true, onBankStateChanged = true }
-local CALLBACKS = { "customView", "onClose", "onBankItems", "onBankClose", "onBankStateChanged" }
+    onSelect = true, onDeselect = true, onClose = true, onBankItems = true, onBankClose = true, onBankStateChanged = true }
+local CALLBACKS = { "customView", "onSelect", "onDeselect", "onClose", "onBankItems", "onBankClose", "onBankStateChanged" }
 local PAGE_FIELDS = { title = true, rows = true, allowNativeDrag = true }
 local ID_LENGTH = 64
 local TEXT_LENGTH = 80
 
 local hasOnlyFields = PlainData.HasOnlyFields
 
+-- A plugin's error must not stop other plugins.
+local function callExtensionCallback(extension, name, ...)
+    local action = extension.callbacks[name]
+    if action == nil then return end
+    local ok, message = pcall(action, ...)
+    if not ok then debugLog("Bank Core extension ", extension.id, " ", name, " failed: ", message) end
+end
+
 -- Check plugin details and keep a copy.
 local function readRegistration(description)
     if type(description) ~= "table" or not hasOnlyFields(description, REGISTRATION_FIELDS) then
         return nil, "a registration is a table of id, name, icon, column, customView, onClose, onBankItems,"
-            .. " onBankClose, onBankStateChanged and optional allowNativeDrag and alwaysShowScrollbar"
+            .. " onSelect, onDeselect, onBankClose, onBankStateChanged and optional allowNativeDrag and alwaysShowScrollbar"
     end
     local id = rawget(description, "id")
     if not PlainData.ID(id, ID_LENGTH) then
@@ -171,6 +179,32 @@ function PluginPages:ShownPage(extension)
     return page ~= nil and page.owner == extension and page or nil
 end
 
+-- Selection is independent of the plugin page and sidebar mount lifetime.
+function PluginPages:SelectedOwner()
+    if self.closed or self.suspended or not self:BankReady() then return nil end
+    local tabID = self.layout.sidebarMode
+    if type(tabID) ~= "string" or tabID:sub(1, #TAB_PREFIX) ~= TAB_PREFIX then return nil end
+    local extension = self.owners[tabID:sub(#TAB_PREFIX + 1)]
+    return extension ~= nil and extension.icon ~= nil and extension or nil
+end
+
+function PluginPages:DeselectExtension(extension)
+    if extension == nil or self.selectedExtension ~= extension then return end
+    self.selectedExtension = nil
+    callExtensionCallback(extension, "onDeselect")
+end
+
+-- Finish the old plugin's cleanup before notifying the newly selected plugin.
+function PluginPages:DeliverSelectionChanges()
+    if self.selectedExtension == self:SelectedOwner() then return end
+    self:DeselectExtension(self.selectedExtension)
+    local selected = self:SelectedOwner()
+    if selected ~= nil then
+        self.selectedExtension = selected
+        callExtensionCallback(selected, "onSelect")
+    end
+end
+
 -- Build sidebar tabs for plugins with icons.
 function PluginPages:PublishTabs()
     if self.suspended then self.publishPending = true; return end
@@ -270,6 +304,7 @@ end
 function PluginPages:DisposeOwner(extension, replaced)
     if not self:IsLive(extension) then return true end
     self.owners[extension.id] = nil
+    self:DeselectExtension(extension)
     local page = self:ShownPage(extension)
     if page ~= nil then page.title, page.rows, page.draw = "", {}, nil end
     if extension.icon ~= nil and not replaced then self:PublishTabs() end
@@ -427,6 +462,7 @@ end
 function PluginPages:BankClosed()
     if self.closed or self.suspended or not self.layout.active then return end
     for _, extension in pairs(self.owners) do extension.bankClosed = true end
+    self:DeselectExtension(self.selectedExtension)
     self:Notify()
 end
 
@@ -436,14 +472,6 @@ function PluginPages:Notify()
         Event.Logic.Unsubscribe(self.notifyEvent)
         self:DeliverChanges()
     end)
-end
-
--- A plugin's error must not stop other plugins.
-local function callExtensionCallback(extension, name, ...)
-    local action = extension.callbacks[name]
-    if action == nil then return end
-    local ok, message = pcall(action, ...)
-    if not ok then debugLog("Bank Core extension ", extension.id, " ", name, " failed: ", message) end
 end
 
 -- Include removed optional fields when comparing.
@@ -496,6 +524,7 @@ end
 
 -- Notify registered plugins in ID order.
 function PluginPages:DeliverChanges()
+    self:DeliverSelectionChanges()
     local extensionIDs = {}
     for extensionID in pairs(self.owners) do extensionIDs[#extensionIDs + 1] = extensionID end
     table.sort(extensionIDs)
@@ -514,6 +543,7 @@ function PluginPages:Suspend()
     local owners = {}
     for _, extension in pairs(self.owners) do owners[#owners + 1] = extension end
     self.suspended, self.layout, self.menuRouter = true, nil, nil
+    self:DeselectExtension(self.selectedExtension)
     self.isInGame, self.bankIsOpen = nil, nil
     Event.Logic.Unsubscribe(self.refreshEvent)
     Event.Logic.Unsubscribe(self.notifyEvent)
@@ -550,6 +580,7 @@ function PluginPages:Close()
     Event.Logic.Unsubscribe(self.notifyEvent)
     self.closed = true
     self.layout = nil
+    self:DeselectExtension(self.selectedExtension)
     for _, extension in ipairs(extensionsToClose) do
         if extension.shown or extension == shownExtension then callExtensionCallback(extension, "onClose") end
         if bankOpen or extension.bankClosed then callExtensionCallback(extension, "onBankClose") end
