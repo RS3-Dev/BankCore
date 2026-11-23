@@ -105,6 +105,8 @@ function BankSession.new(options)
         menuRouter = nil,
         layoutRetryTicks = 0,
         layoutReadyTicks = 0,
+        lastClassicUI = false,
+        deferImmediateAttach = false,
         inGame = Player.IsAvailable(),
         shutDown = false,
     }, BankSession)
@@ -118,6 +120,8 @@ function BankSession.new(options)
         saveRailOrder = function(railOrder) return session:SavePreference("railOrder", railOrder) end,
         saveBankHeight = function(height) return session:SavePreference("bankHeight", height) end,
     })
+    session.lastClassicUI = session.layout.IsClassicUI ~= nil and session.layout:IsClassicUI() == true or false
+    session.layout.onInterfaceModeChanged = function() session:HandleInterfaceModeChange() end
     local pageOptions = {
         isInGame = function() return session.inGame end,
         bankIsOpen = bankIsOpen,
@@ -161,6 +165,12 @@ end
 -- Attempt attachment directly from the bank inventory event.
 function BankSession:AttachFromInventory()
     if not self.inGame or self.shutDown or self.layout.active then return end
+    if self.deferImmediateAttach then
+        self.deferImmediateAttach = false
+        debugLog("inventory received after interface mode switch; deferring to readiness retry")
+        self:BeginLayoutRetry()
+        return
+    end
     -- A fresh inventory can attach now even while a previous attempt is retrying.
     local keepRetry = self.layoutRetryTicks > 0
     if not keepRetry then self:StopLayoutRetry() end
@@ -440,6 +450,41 @@ function BankSession:CloseBank()
     self:StopLayoutRetry()
     self.pluginPages:BankClosed("closed")
     self.layout:Restore()
+end
+
+-- Restore and recalculate bank layout when switching between Classic and Modern UI.
+function BankSession:HandleInterfaceModeChange()
+    if self.shutDown or not self.inGame then return end
+    local layout = self.layout
+    local nowClassic = layout ~= nil and layout.IsClassicUI ~= nil and layout:IsClassicUI() == true or false
+    local attachedMismatch = layout ~= nil and layout.active and (layout.detachedSidebar == true) ~= nowClassic
+    if nowClassic == self.lastClassicUI and not attachedMismatch then return end
+    local previousClassic = self.lastClassicUI
+    self.lastClassicUI = nowClassic
+    debugLog("Bank Core interface mode changed: ", previousClassic and "classic" or "modern",
+        " -> ", nowClassic and "classic" or "modern", "; active=", tostring(layout ~= nil and layout.active))
+    if layout ~= nil and layout.LogInterfaceMode ~= nil then layout.LogInterfaceMode() end
+    local wasActive = layout ~= nil and layout.active == true
+    if wasActive then
+        local ok, message = pcall(function() self:CloseBank() end)
+        if not ok then
+            debugLog("Bank Core could not cleanly restore bank during interface mode switch: ", tostring(message))
+        end
+    else
+        self:StopLayoutRetry()
+    end
+    if layout ~= nil then
+        layout.savedBankHeight = nil
+        layout.openingBankHeight = nil
+        layout.settlingOpenHeight = false
+        layout.lastBankWindowMeasurements = nil
+    end
+    self.deferImmediateAttach = true
+    local ok, open = pcall(bankIsOpen)
+    if wasActive or (ok and open) then
+        self.deferImmediateAttach = false
+        self:BeginLayoutRetry()
+    end
 end
 
 function BankSession:Start()

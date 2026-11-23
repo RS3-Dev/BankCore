@@ -100,6 +100,10 @@ local function classicUI()
     return interfaceMode() == "classic"
 end
 
+function BankWindow.IsClassicUI()
+    return classicUI()
+end
+
 local function sidebarParent(self)
     if not self.detachedSidebar then return self.components.all end
     local bankLayer = component(id.Component.TOPLEVEL_V2__BANK_LAYER)
@@ -384,6 +388,23 @@ function BankWindow:RebuildPageInput()
     if self.shownPage ~= nil then self.itemHover:BuildPageInput() end
 end
 
+local function frameMoved(layout, entry)
+    if layout.xParent ~= 0 or layout.xSelf ~= 0 then
+        return math.abs(layout.x - entry.expandedX) > 2
+    end
+    local leftMoved = math.abs(layout.x - entry.expandedX) > 2
+    local rightMoved = math.abs((layout.x + layout.width) - (entry.expandedX + entry.expandedWidth)) > 2
+    local centerMoved = math.abs((layout.x + layout.width * 0.5) - (entry.expandedX + entry.expandedWidth * 0.5)) > 2
+    return leftMoved and rightMoved and centerMoved
+end
+
+-- Detect when the client strips Core's added frame width or snaps the frame smaller during a move.
+local function isFrameWidthReset(layout, entry)
+    if layout == nil or entry == nil or entry.width <= 0 then return false end
+    if math.abs(layout.width - (entry.expandedWidth - entry.width)) <= 2 then return true end
+    return layout.width < entry.expandedWidth - 2 and frameMoved(layout, entry)
+end
+
 -- Remember the player's window size while the sidebar is open
 function BankWindow:CaptureFrame()
     local record = self.windowRecord.value
@@ -403,6 +424,11 @@ function BankWindow:CaptureFrame()
     local partLayout = tryReadPartLayout(value)
     if partLayout == nil then
         debugLog("Bank Core could not read the bank window frame; keeping its last width")
+        return
+    end
+    if isFrameWidthReset(partLayout, entry) then
+        debugLog("Bank Core ignored a native frame width shrink while capturing geometry: ",
+            partLayout.width, " vs ", entry.expandedWidth)
         return
     end
     entry.expandedX, entry.expandedWidth = partLayout.x, partLayout.width
@@ -431,7 +457,7 @@ local function frameOffsets(entry)
 end
 
 -- Reapply the recorded expansion without clearing it or adding width again.
-function BankWindow:FixBankGeometry()
+function BankWindow:FixBankGeometry(preserveMovedFrame)
     if not self.active then return false end
     local ok, message = pcall(function()
         if self.detachedSidebar then
@@ -440,6 +466,7 @@ function BankWindow:FixBankGeometry()
             local record = self.windowRecord.value
             if record == nil then error("No saved bank geometry is available.", 0) end
             local parts = lookUpParts()
+            local frameEntry = findFrameRecord(record)
             local changes = {}
             for _, entry in ipairs(record.parts) do
                 local value = findPartByName(parts, entry.slot)
@@ -452,8 +479,20 @@ function BankWindow:FixBankGeometry()
             end
             for _, change in ipairs(changes) do
                 local value, layout, entry = change.value, change.layout, change.entry
-                value:SetSize(entry.expandedWidth, layout.height, layout.widthParent, layout.heightParent)
-                value:SetPos(entry.expandedX, layout.y, layout.xParent, layout.yParent, layout.xSelf, layout.ySelf)
+                local targetX, targetWidth = entry.expandedX, entry.expandedWidth
+                if preserveMovedFrame and entry == frameEntry then
+                    local nativeResetX = layout.x == entry.expandedX - entry.x
+                    if layout.x ~= entry.expandedX and not nativeResetX then
+                        targetX = layout.x
+                        entry.expandedX = layout.x
+                    end
+                    if layout.width > entry.expandedWidth then
+                        targetWidth = layout.width
+                        entry.expandedWidth = layout.width
+                    end
+                end
+                value:SetSize(targetWidth, layout.height, layout.widthParent, layout.heightParent)
+                value:SetPos(targetX, layout.y, layout.xParent, layout.yParent, layout.xSelf, layout.ySelf)
             end
             -- Undo these offsets on close using the current component handles.
             self.components, self.expansion = parts, {}
@@ -474,6 +513,29 @@ function BankWindow:FixBankGeometry()
     return ok
 end
 
+-- Restore Core's added frame width when the client snaps the frame smaller during a move or reset.
+function BankWindow:RestoreExpandedFrameWidth(frame, frameLayout, frameEntry)
+    local ok, message = pcall(function()
+        local targetX = frameLayout.x
+        if frameLayout.x == frameEntry.expandedX - frameEntry.x then
+            targetX = frameEntry.expandedX
+        else
+            frameEntry.expandedX = frameLayout.x
+        end
+        frame:SetSize(frameEntry.expandedWidth, frameLayout.height,
+            frameLayout.widthParent, frameLayout.heightParent)
+        if targetX ~= frameLayout.x then
+            frame:SetPos(targetX, frameLayout.y, frameLayout.xParent, frameLayout.yParent,
+                frameLayout.xSelf, frameLayout.ySelf)
+        end
+        self.windowRecord:Save()
+        self.lastBankWindowMeasurements = nil
+        self:Changed(false)
+    end)
+    if not ok then debugLog("Bank Core could not restore bank frame width: ", tostring(message)) end
+    return ok
+end
+
 -- Native layout settlement can replace child offsets after immediate attachment.
 local function liveExpansionOffsets(self, record)
     local savedParts = {}
@@ -483,14 +545,22 @@ local function liveExpansionOffsets(self, record)
     for _, applied in ipairs(self.expansion or {}) do
         local x, width = applied.x, applied.width
         local saved = savedParts[applied.slot]
-        if saved ~= nil and saved ~= frame then
+        if saved ~= nil then
             local layout = tryReadPartLayout(applied.value)
             if layout ~= nil then
-                if layout.x ~= saved.expandedX then x = 0 end
-                if layout.width ~= saved.expandedWidth then width = 0 end
-                if x ~= applied.x or width ~= applied.width then
-                    debugLog("Bank Core kept native layout changes for ", applied.slot,
-                        "; removing only offsets still present")
+                if saved == frame then
+                    if saved.width ~= 0 and math.abs(layout.width - (saved.expandedWidth - saved.width)) <= 2 then
+                        width = 0
+                        if layout.x == saved.expandedX - saved.x then x = 0 end
+                        debugLog("Bank Core skipped restoring frame width already reset by the client")
+                    end
+                else
+                    if layout.x ~= saved.expandedX then x = 0 end
+                    if layout.width ~= saved.expandedWidth then width = 0 end
+                    if x ~= applied.x or width ~= applied.width then
+                        debugLog("Bank Core kept native layout changes for ", applied.slot,
+                            "; removing only offsets still present")
+                    end
                 end
             end
         end
@@ -658,19 +728,36 @@ local function syncSidebarSize(self, content)
 end
 
 function BankWindow:WatchBankWindow()
+    if self.active and (self.detachedSidebar == true) ~= classicUI() then
+        debugLog("Bank Core detected interface mode change while bank is attached")
+        if self.onInterfaceModeChanged ~= nil then self.onInterfaceModeChanged() end
+        return
+    end
     local content = self.expanded and BankInterface.Find(COMPONENTS.content) or nil
-    -- Some native interactions reset the content offset without replacing its handle.
+    -- Some native interactions reset the content offset or strip Core's frame width without replacing handles.
     if self.active and self.expanded and not self.detachedSidebar and not self:IsPresetViewOpen() then
         local record = self.windowRecord.value
         local layout = content ~= nil and tryReadPartLayout(content) or nil
         if record ~= nil and record.sidebarWidth > 0 and layout ~= nil
             and content.hidden ~= true and content.height > 0 then
+            local contentReset = false
             for _, entry in ipairs(record.parts) do
-                if entry.slot == "content" and layout.x ~= entry.expandedX then
-                    debugLog("Bank Core reapplying saved geometry after a native layout reset")
-                    self:FixBankGeometry()
+                if entry.slot == "content"
+                    and (layout.x ~= entry.expandedX or layout.width ~= entry.expandedWidth) then
+                    contentReset = true
                     break
                 end
+            end
+            local frameEntry = findFrameRecord(record)
+            local frame = frameEntry ~= nil and findPartByName(self.components, frameEntry.slot) or nil
+            local frameLayout = frame ~= nil and tryReadPartLayout(frame) or nil
+            local frameWidthReset = isFrameWidthReset(frameLayout, frameEntry)
+            if contentReset then
+                debugLog("Bank Core reapplying saved geometry after a native layout reset")
+                self:FixBankGeometry(true)
+            elseif frameWidthReset then
+                debugLog("Bank Core restoring bank frame width after a native frame reset")
+                self:RestoreExpandedFrameWidth(frame, frameLayout, frameEntry)
             end
         end
     end
@@ -745,6 +832,12 @@ function BankWindow:IsReady()
             end
         end
     end
+    if not classicUI() then
+        local host = ui.Interfaces:GetComponent(id.Component.TOPLEVEL_V2__BANK_WINDOW)
+        if host ~= nil and type(host.width) == "number" and host.width <= 0 then
+            return false, "HOST width=" .. tostring(host.width)
+        end
+    end
     return true
 end
 
@@ -757,28 +850,36 @@ local function applyWindow(self)
         self.components = {}
         return false
     end
-    debugLog("window parts located; recovering saved geometry")
-
-    -- Undo leftover expansion before adding sidebar space.
-    if not BankWindow.RecoverExpansion(self.components, self.windowRecord.value) then
-        debugLog("saved geometry recovery blocked attachment")
-        self.components = {}
-        self.windowRecord:Save()
-        return false
+    local detached = classicUI()
+    if not detached then
+        local frame = self.components.host or all
+        local frameLayout = frame ~= nil and tryReadPartLayout(frame) or nil
+        if frameLayout == nil
+            or (type(frame.width) == "number" and frame.width <= 0)
+            or (frameLayout.widthParent == 0 and frameLayout.width <= 0) then
+            debugLog("bank frame width unavailable on attach; deferring to readiness retry")
+            self.components = {}
+            return false
+        end
+        debugLog("window parts located; recovering saved geometry")
+        -- Undo leftover expansion before adding sidebar space.
+        if not BankWindow.RecoverExpansion(self.components, self.windowRecord.value) then
+            debugLog("saved geometry recovery blocked attachment")
+            self.components = {}
+            self.windowRecord:Save()
+            return false
+        end
     end
     self:LogBankWindowMeasurements("attached")
 
     self.active = true
     debugLog("reading All Items selection")
     self.nativeViewAll = self:DetectNativeViewAll() == true
-    self.detachedSidebar = classicUI()
+    self.detachedSidebar = detached
     local liveHeight = all ~= nil and type(all.height) == "number" and all.height > 0 and all.height or 0
     self.openingBankHeight = liveHeight
     self.settlingOpenHeight = self.savedBankHeight ~= nil and self.savedBankHeight ~= liveHeight
-    if self.detachedSidebar then
-        local cleared, reason = self.windowRecord:Clear()
-        if not cleared then error(reason, 0) end
-    else
+    if not self.detachedSidebar then
         debugLog("widening bank")
         self:WidenBankForSidebar()
     end

@@ -16,6 +16,7 @@ local GAME_STATE_EVENT = Config.CORE_REF .. "_game_state"
 local BANK_DRAW_VISIBILITY_EVENT = Config.CORE_REF .. "_bank_draw_visibility"
 local SETTINGS_EVENT = Config.CORE_REF .. "_settings"
 local BANK_KEYBIND_EVENT = Config.CORE_REF .. "_sidebar_keybind"
+local INTERFACE_MODE_EVENT = Config.CORE_REF .. "_interface_mode"
 
 function Lifecycle.new(session, options)
     return setmetatable({
@@ -74,6 +75,18 @@ function Lifecycle:Start()
             session.layout:HandleInventoryUpdate()
         end
     end)
+    local okVarp, generalVarpID = pcall(function()
+        return id ~= nil and id.VarPlayer ~= nil and id.VarPlayer.TOPLEVEL_V2_GENERAL_VARP or nil
+    end)
+    if okVarp and type(generalVarpID) == "number"
+        and Event ~= nil and Event.VarTransmit ~= nil and Event.VarTransmit.Subscribe ~= nil then
+        Event.VarTransmit.Subscribe(INTERFACE_MODE_EVENT, function(event)
+            if event ~= nil and event.var ~= nil and event.var.id == generalVarpID then
+                session:HandleInterfaceModeChange()
+            end
+        end)
+        self.interfaceModeSubscribed = true
+    end
     -- A reload can start Core while the bank is already open.
     if session.inGame then
         local ok, open = pcall(options.bankIsOpen)
@@ -118,6 +131,11 @@ function Lifecycle:Shutdown()
     Event.Logic.Unsubscribe(BANK_KEYBIND_EVENT)
     Event.SettingsLayerReady.Unsubscribe(SETTINGS_EVENT)
     Event.Draw.Unsubscribe(BANK_DRAW_VISIBILITY_EVENT)
+    if self.interfaceModeSubscribed and Event ~= nil and Event.VarTransmit ~= nil
+        and Event.VarTransmit.Unsubscribe ~= nil then
+        self.interfaceModeSubscribed = false
+        Event.VarTransmit.Unsubscribe(INTERFACE_MODE_EVENT)
+    end
     session:StopLayoutRetry()
 
     cleanup("core panel", function() session:DestroyPanel() end)
