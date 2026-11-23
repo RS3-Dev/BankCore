@@ -111,6 +111,7 @@ end
 -- Show a message for missing or failed content.
 local function createEmptyLabel(parent)
     local label = prettyui.Text.new(parent, {
+        categoryID = "auto",
         text = "",
         x = MESSAGE_INSET,
         y = MESSAGE_INSET,

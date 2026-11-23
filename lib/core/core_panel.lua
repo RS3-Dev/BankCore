@@ -75,6 +75,7 @@ function CorePanel.new(parent, options)
         or self.options.width or 1
     self.contentHeight = math.max(CONTENT_HEIGHT, self.options.height or parent.height)
     self.view = prettyui.SimpleView.new(parent, {
+        categoryID = "auto",
         width = panelWidth, height = self.options.nativeSettings and parent.height > 0 and parent.height or self.contentHeight,
         contentHeight = self.contentHeight, scrollable = self.options.nativeSettings == true,
     })

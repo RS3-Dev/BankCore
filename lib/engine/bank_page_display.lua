@@ -399,6 +399,7 @@ function BankPageDisplay:CreateRuntimeSprites(pageItems)
         header.clickthrough = true
 
         local label = prettyui.Text.new(header, {
+            categoryID = "auto",
             text = text,
             x = 0,
             y = 0,

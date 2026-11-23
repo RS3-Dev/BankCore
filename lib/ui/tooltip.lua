@@ -14,6 +14,7 @@ function Tooltip.attach(target, parent, value)
     else
         options.text = tostring(value)
     end
+    if options.categoryID == nil then options.categoryID = "auto" end
     local context = prettyui.Tooltip.getContext(parent)
     local overlay = options.parent or (context and context.parent) or parent
     local self = setmetatable({
