@@ -13,10 +13,7 @@ local BANK_OPEN_EVENT = Config.CORE_REF .. "_bank_open"
 local BANK_CLOSE_EVENT = Config.CORE_REF .. "_bank_close"
 local BANK_UPDATE_EVENT = Config.CORE_REF .. "_bank_update"
 local GAME_STATE_EVENT = Config.CORE_REF .. "_game_state"
-local BANK_VISIBILITY_EVENT = Config.CORE_REF .. "_bank_visibility"
 local BANK_DRAW_VISIBILITY_EVENT = Config.CORE_REF .. "_bank_draw_visibility"
-local BANK_VAR_EVENT = Config.CORE_REF .. "_bank_var"
-local BANK_TRANSITION_EVENT = Config.CORE_REF .. "_bank_transition"
 local SETTINGS_EVENT = Config.CORE_REF .. "_settings"
 local BANK_KEYBIND_EVENT = Config.CORE_REF .. "_sidebar_keybind"
 
@@ -49,7 +46,6 @@ function Lifecycle:Start()
         local selectedBankTab = options.bankViewSelection(event)
         if session.inGame and selectedBankTab ~= nil then
             local entry = event.entry
-            session:StopFilterSettle()
             session.layout.itemHover:RestoreHoveredBankStack()
             if session.layout.shownPage ~= nil then session.layout:ShowPage(nil) end
             session.layout:SetNativeViewAll(selectedBankTab == "all")
@@ -58,12 +54,8 @@ function Lifecycle:Start()
             return
         end
         if session.inGame and options.selectedEntryBelongsToBank(event) then
-            -- Preset changes have no event of their own.
+            -- Menu actions can change bank state; item changes arrive through InventoryUpdated.
             session.layout:Changed(false)
-            if session.layout.shownPage ~= nil
-                and not session.layout.itemHover:HasHoveredBankStack() then
-                session:BeginFilterSettle()
-            end
         end
     end)
 
@@ -82,83 +74,25 @@ function Lifecycle:Start()
             session.layout:HandleInventoryUpdate()
         end
     end)
-    Event.VarTransmit.Subscribe(BANK_VAR_EVENT, function(event)
-        if not session.inGame then return end
-        local name = event.var.configName
-        if name ~= "BANK_TEMP" and name ~= "BANK_RESIZE_CYCLE" then return end
-        debugLog(name, " transmitted: ", event.oldValue, " -> ", event.newValue)
-        -- Coalesce updates and let the game's interface changes finish first.
-        Event.Logic.Subscribe(BANK_TRANSITION_EVENT, function()
-            Event.Logic.Unsubscribe(BANK_TRANSITION_EVENT)
-            if session.shutDown or not session.inGame then return end
-            -- Bank variables also update during deposits and withdrawals.
-            if session.layout.active then
-                local ok, open = pcall(options.bankIsOpen)
-                if ok and open and session.layout:IsAttachedToCurrentBank() then return end
-                session:CloseBank()
-            end
-            session:BeginLayoutRetry()
-        end)
-    end)
-    debugLog("inventory listeners registered; checking existing bank")
-    local function readBankVisibility()
-        if not session.inGame then return false, "not in game" end
-        local ok, open, reason = pcall(options.bankIsOpen)
-        if not ok then return false, "bank detection ERROR: " .. tostring(open) end
-        return open, reason or (open and "bank detected" or "bank not detected")
+    -- A reload can start Core while the bank is already open.
+    if session.inGame then
+        local ok, open = pcall(options.bankIsOpen)
+        if ok and open then session:BeginLayoutRetry() end
     end
-    local bankWasOpen, lastVisibilityReason = readBankVisibility()
-    debugLog("initial bank open=", bankWasOpen, "; reason=", lastVisibilityReason)
-    if bankWasOpen then session:BeginLayoutRetry() end
     -- Detached classic controls do not inherit the native bank's visibility.
     Event.Draw.Subscribe(BANK_DRAW_VISIBILITY_EVENT, function()
         local layout = session.layout
         if layout == nil or not layout.active or not layout.detachedSidebar then return end
-        local open = readBankVisibility()
+        local ok, open = pcall(options.bankIsOpen)
+        open = session.inGame and ok and open
         local hidden = layout.IsSidebarHidden ~= nil and layout:IsSidebarHidden()
         for _, name in ipairs({ "sidebarRoot", "sidebarOverlay", "sidebarTooltipOverlay" }) do
             local layer = layout[name]
             if layer ~= nil then pcall(function() layer.hidden = not open or hidden end) end
         end
+        -- Follow opening geometry before drawing; hiding must not depend on positioning.
+        if open and not hidden then pcall(function() layout:PositionDetachedSidebar() end) end
     end)
-    -- Returning from a bank dialog may not add the inventory again.
-    local visibilityTicks = 0
-    Event.Logic.Subscribe(BANK_VISIBILITY_EVENT, function()
-        visibilityTicks = visibilityTicks + 1
-        local layout = session.layout
-        local classicActive = layout ~= nil and layout.active and layout.detachedSidebar
-        local waitingForBank = session.inGame and layout ~= nil and not layout.active
-        if visibilityTicks < 10 and not classicActive and not waitingForBank then return end
-        visibilityTicks = 0
-        local bankOpen, reason = readBankVisibility()
-        if reason ~= lastVisibilityReason then
-            debugLog("bank visibility check: ", reason)
-            lastVisibilityReason = reason
-        end
-        if bankOpen == bankWasOpen then
-            if bankOpen then
-                if session.layout.active and not session.layout:IsAttachedToCurrentBank() then
-                    session:CloseBank()
-                    session:BeginLayoutRetry()
-                else
-                    session:RetryLayoutWhenReady()
-                end
-            elseif session.layout.active then
-                session:CloseBank()
-            end
-            return
-        end
-        debugLog("bank visibility changed: ", bankWasOpen, " -> ", bankOpen)
-        bankWasOpen = bankOpen
-        if bankOpen then
-            session:BeginLayoutRetry()
-        elseif session.layout.active then
-            session:CloseBank()
-        else
-            session:StopLayoutRetry()
-        end
-    end)
-
     debugLog("Bank Core started its bank session")
 end
 
@@ -181,13 +115,9 @@ function Lifecycle:Shutdown()
     Event.InventoryAdded.Unsubscribe(BANK_OPEN_EVENT)
     Event.InventoryRemoved.Unsubscribe(BANK_CLOSE_EVENT)
     Event.InventoryUpdated.Unsubscribe(BANK_UPDATE_EVENT)
-    Event.VarTransmit.Unsubscribe(BANK_VAR_EVENT)
-    Event.Logic.Unsubscribe(BANK_TRANSITION_EVENT)
-    Event.Logic.Unsubscribe(BANK_VISIBILITY_EVENT)
     Event.Logic.Unsubscribe(BANK_KEYBIND_EVENT)
     Event.SettingsLayerReady.Unsubscribe(SETTINGS_EVENT)
     Event.Draw.Unsubscribe(BANK_DRAW_VISIBILITY_EVENT)
-    session:StopFilterSettle()
     session:StopLayoutRetry()
 
     cleanup("core panel", function() session:DestroyPanel() end)

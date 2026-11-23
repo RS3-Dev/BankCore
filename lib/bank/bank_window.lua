@@ -123,11 +123,21 @@ function BankWindow:PositionDetachedSidebar()
         and (Config.SIDEBAR_TAB_WIDTH + Config.SIDEBAR_TAB_GAP) or Config.SIDEBAR_WIDTH
     local width = contentWidth + Config.CLASSIC_SIDEBAR_LEFT_PADDING
     local sidebarX = self.sidebarEdge == "right" and x + self.components.all.width or x - width
-    self.sidebarRoot:SetPos(sidebarX - parentX, y - parentY)
-    self.sidebarRoot:SetSize(width, self.components.all.height)
+    local localX, localY = sidebarX - parentX, y - parentY
+    if self.sidebarRoot.x ~= localX or self.sidebarRoot.y ~= localY then
+        self.sidebarRoot:SetPos(localX, localY)
+    end
+    if self.sidebarRoot.width ~= width or self.sidebarRoot.height ~= self.components.all.height then
+        self.sidebarRoot:SetSize(width, self.components.all.height)
+    end
     if self.sidebarOverlay ~= nil then
-        self.sidebarOverlay:SetPos(x - parentX, y - parentY)
-        self.sidebarOverlay:SetSize(self.components.all.width, self.components.all.height)
+        if self.sidebarOverlay.x ~= x - parentX or self.sidebarOverlay.y ~= y - parentY then
+            self.sidebarOverlay:SetPos(x - parentX, y - parentY)
+        end
+        if self.sidebarOverlay.width ~= self.components.all.width
+            or self.sidebarOverlay.height ~= self.components.all.height then
+            self.sidebarOverlay:SetSize(self.components.all.width, self.components.all.height)
+        end
     end
 end
 
@@ -621,7 +631,6 @@ function BankWindow:WatchBankWindow()
     end
     -- Bank panels can change without events, even when no plugin page is open.
     self.onChange()
-    self:PositionDetachedSidebar()
     if self.expanded then
         local content = BankInterface.Find(COMPONENTS.content)
         local height = content ~= nil and content.height or 0
@@ -666,13 +675,6 @@ function BankWindow:IsReady()
     local border = component(COMPONENTS.border)
     local viewport = component(BANK_ITEMS_CONTAINER_COMPONENT_ID)
     local itemLayer = component(BANK_ITEMS_COMPONENT_ID)
-    local geometry = {}
-    local function sample(value, name)
-        if value == nil then return end
-        geometry[#geometry + 1] = table.concat({ name, tostring(value.x), tostring(value.y),
-            tostring(value.width), tostring(value.height) }, ",")
-    end
-    sample(ui.Interfaces:GetComponent(id.Component.TOPLEVEL_V2__BANK_WINDOW), "host")
     for _, part in ipairs({
         { "ALL (0)", all, true, true },
         { "BACKGROUND_LAYER (1)", backgroundLayer, false, false },
@@ -690,11 +692,8 @@ function BankWindow:IsReady()
                 return false, name .. " height=" .. tostring(value.height)
             end
         end
-        sample(value, name)
     end
-    local scale = game and game.options and game.options.InterfaceScale
-    geometry[#geometry + 1] = tostring(scale and scale.setting)
-    return true, nil, table.concat(geometry, "|")
+    return true
 end
 
 -- Find the bank parts, add sidebar space, and watch window changes
@@ -740,22 +739,6 @@ local function applyWindow(self)
     return true
 end
 
--- Inventory updates do not require rebuilding a sidebar that still belongs to this bank.
-function BankWindow:IsAttachedToCurrentBank()
-    if not self.active or self.sidebarRoot == nil then return false end
-    local ok, attached = pcall(function()
-        local all = component(COMPONENTS.all)
-        local content = component(COMPONENTS.content)
-        local hidden = self.IsSidebarHidden ~= nil and self:IsSidebarHidden()
-        return samePart(all, self.components.all) and samePart(content, self.components.content)
-            and (self.detachedSidebar == true) == classicUI()
-            and samePart(self.sidebarRoot.parent, sidebarParent(self))
-            and self.sidebarRoot.width > 0 and self.sidebarRoot.height > 0
-            and (hidden or (self.sidebarRoot.hidden ~= true and self.sidebarRoot.visibleGlobal ~= false))
-    end)
-    return ok and attached == true
-end
-
 -- Roll back partial attachment before reporting the original build failure.
 function BankWindow:Apply(skipReadiness)
     debugLog("Apply entered; active=", self.active)
@@ -794,16 +777,6 @@ function BankWindow:ReadNativeFilterMode()
     if normalized == "cancel search" then return "search", text end
     if normalized == "clear filter" then return "filter", text end
     return nil, text:sub(1, 80)
-end
-
--- Check the label to distinguish search from filters.
-function BankWindow:IsSearchActive()
-    return self:ReadNativeFilterMode() == "search"
-end
-
--- A visible cancel button means bank filters are active.
-function BankWindow:IsFilterActive()
-    return self:ReadNativeFilterMode() == "filter"
 end
 
 -- A visible close button means the preset selector is open.

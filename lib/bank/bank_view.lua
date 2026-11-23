@@ -343,9 +343,4 @@ function BankView:HandleInventoryUpdate()
     self.itemHover:RefreshAfterBankRebuild(not hasHoveredStack)
 end
 
-function BankView:ShownPageIsInSync()
-    if self.shownPage == nil then return true end
-    return self.pageState:IsInSync()
-end
-
 return BankView

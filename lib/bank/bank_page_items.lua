@@ -40,32 +40,6 @@ function BankPageItems:Restore()
     self.sharedStacks = {}
 end
 
-function BankPageItems:IsInSync()
-    if not self.active then return false end
-
-    local bankItemLayer = component(BANK_ITEMS_COMPONENT_ID)
-    if bankItemLayer == nil then return false end
-
-    -- Compare slots directly without sorting.
-    local stacksBySlot = {}
-    for _, bankItemSnapshot in ipairs(BankItemIndex.Read(bankItemLayer)) do
-        stacksBySlot[bankItemSnapshot.instanceKey] = { objectID = bankItemSnapshot.objectID, quantity = bankItemSnapshot.quantity }
-    end
-    local snapshotCount = 0
-    for _, bankItem in ipairs(self.bankItems) do
-        snapshotCount = snapshotCount + 1
-        local currentStack = stacksBySlot[bankItem.instanceKey]
-        if currentStack == nil
-            or currentStack.objectID ~= bankItem.objectID
-            or currentStack.quantity ~= bankItem.quantity then
-            return false
-        end
-        stacksBySlot[bankItem.instanceKey] = nil
-    end
-    for _ in pairs(stacksBySlot) do return false end
-    return snapshotCount > 0
-end
-
 function BankPageItems:GetPlaceholderStyle()
     return {
         alpha = PLACEHOLDER_ALPHA,
