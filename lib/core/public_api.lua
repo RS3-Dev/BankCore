@@ -12,6 +12,7 @@ local function createExtensionHandle(pluginPages, extension)
         GetBankItems = function() return pluginPages:BankItems(extension) end,
         GetBankBounds = function() return pluginPages:BankBounds(extension) end,
         GetBankState = function() return pluginPages:BankState(extension) end,
+        HighlightAllItems = function() return pluginPages:HighlightAllItems(extension) end,
         GetMenuItem = function(_, menu)
             local router = pluginPages.menuRouter
             if router == nil or not pluginPages:IsLive(extension) then return nil end

@@ -191,6 +191,24 @@ function PluginPages:ClearAllItemsHint()
     if self.allItemsHint ~= nil then self.allItemsHint:Clear() end
 end
 
+-- Point to the native All Items tab after an explicit user action blocked by not_all_items.
+function PluginPages:HighlightAllItems(extension)
+    if not self:IsLive(extension) then return false, "stale" end
+    if not self:BankReady() then return false, "bank_closed" end
+    if self:IsChanging() then return false, "busy" end
+    local layout = self.layout
+    if layout:IsPresetViewOpen() then return false, "preset_open" end
+    local filterMode = layout:ReadNativeFilterMode()
+    if filterMode == "search" then return false, "search_active" end
+    if filterMode == "filter" then return false, "filter_active" end
+    if self:ViewAll() then return false, "already_all_items" end
+    if layout.shownPage ~= nil and layout.shownPage ~= layout.settingsPage then
+        return false, "busy"
+    end
+    if not self:ShowAllItemsHint() then return false, "unavailable" end
+    return true
+end
+
 -- Explain why the page cannot open, or return nil.
 function PluginPages:OpenBlocker()
     if not self:BankReady() or BankInterface.Get(BankInterface.ITEMS) == nil then

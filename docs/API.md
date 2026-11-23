@@ -112,8 +112,8 @@ It is available without registering an extension.
 
 `bankcore.Register(spec)` returns an extension handle, or `nil, reason, detail`.
 The root API provides `Register` and `SanitizeString`. The handle provides `SetPage`, `Refresh`,
-`Open`, `Close`, `IsOpen`, `GetBankItems`, `GetBankBounds`, `GetBankState`, `GetMenuItem` and
-`Dispose`. Both are plain tables of functions, suitable for the client's copied
+`Open`, `Close`, `IsOpen`, `GetBankItems`, `GetBankBounds`, `GetBankState`, `HighlightAllItems`,
+`GetMenuItem` and `Dispose`. Both are plain tables of functions, suitable for the client's copied
 dependency exports; they expose no session or real bank component.
 
 ```lua
@@ -353,6 +353,13 @@ columnless rail icon) and presets, search and filters are inactive, Core highlig
 and points to the native All Items tab until the player switches to All Items,
 opens a page, opens presets/search/filter, changes or collapses the sidebar, or
 closes the bank.
+
+Plugins that pre-check `GetBankState()` on an explicit player click before
+preparing a page can call `ext:HighlightAllItems()` when `viewAll` is false to
+show the same highlight. It returns `true`, or `false, reason` (`stale`,
+`bank_closed`, `busy`, `preset_open`, `search_active`, `filter_active`,
+`already_all_items`, or `unavailable`). Do not call it for passive state updates
+or silent background checks.
 
 Setting the currently displayed page queues one redraw for the next logic tick,
 keeping scroll within the new height. Several `SetPage` calls before that tick
