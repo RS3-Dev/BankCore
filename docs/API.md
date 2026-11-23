@@ -347,8 +347,12 @@ including for `GetBankState().viewAll`. If the control cannot be read, Core uses
 the last known selection.
 
 If drawing begins and fails, `Open` returns `false, "failed"` and Core restores
-the native view. Core displays no refusal notice; the plugin explains the
-result in its own UI.
+the native view. Core displays no refusal text; the plugin explains the result in
+its own UI. When `Open` fails with `not_all_items` (including when clicking a
+columnless rail icon) and presets, search and filters are inactive, Core highlights
+and points to the native All Items tab until the player switches to All Items,
+opens a page, opens presets/search/filter, changes or collapses the sidebar, or
+closes the bank.
 
 Setting the currently displayed page queues one redraw for the next logic tick,
 keeping scroll within the new height. Several `SetPage` calls before that tick

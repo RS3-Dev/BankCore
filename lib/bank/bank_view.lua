@@ -66,6 +66,10 @@ function BankView:Changed(itemsChanged)
     self.onChange()
 end
 
+function BankView:ClearAllItemsHint()
+    if self.onClearAllItemsHint ~= nil then self.onClearAllItemsHint() end
+end
+
 -- Keep sidebar popups and Core's tooltips above the page and its input layers.
 function BankView:RaiseMountOverlays()
     if self.tabMount ~= nil then self.tabMount:RaiseOverlay() end
@@ -104,6 +108,7 @@ function BankView:DestroyRail()
         local ok, message = pcall(action)
         if not ok then failure = failure or message end
     end
+    cleanup(function() self:ClearAllItemsHint() end)
     cleanup(function() self.itemHover:RemovePageInput() end)
     cleanup(function() self.itemHover:RestoreBankItemPositions() end)
     cleanup(function() self.itemHover:CancelMissingStackRetry() end)
@@ -215,6 +220,7 @@ local function showPage(self, page)
         end
     end
     if page ~= nil then
+        self:ClearAllItemsHint()
         debugLog("Bank Core showed ", page.title, " for ", page.owner.id, "; matched ",
             matchCount, " bank item(s)")
     end
@@ -256,6 +262,7 @@ end
 -- Close the plugin page when the player leaves the All Items tab.
 function BankView:SetNativeViewAll(enabled)
     enabled = enabled == true
+    if enabled then self:ClearAllItemsHint() end
     if enabled and self.nativeViewAll then return end
     self.nativeViewAll = enabled
     if not enabled and self.shownPage ~= nil then self:ShowPage(nil) end

@@ -78,6 +78,7 @@ if package ~= nil and package.loaded ~= nil then
         "lib/features/extensions/page_layout",
         "lib/features/extensions/plain_data",
         "lib/features/extensions/plugin_pages",
+        "lib/ui/all_items_hint",
         "lib/ui/bank_controls",
         "lib/ui/menu_entries",
         "lib/ui/native_ui",
