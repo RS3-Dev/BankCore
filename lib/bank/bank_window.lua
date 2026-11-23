@@ -73,17 +73,25 @@ local BANK_WINDOW_CHECK_TICKS = 10
 local component = BankInterface.Get
 
 local function interfaceMode()
-    local ok, value = pcall(function() return var.VarPlayer["TOPLEVEL_V2_SKINS_VARP"].value end)
-    if not ok or value == nil then return "unknown", "unavailable" end
-    local mode = value == 26 and "classic" or (value == 9 and "modern" or "unknown")
-    return mode, tostring(value)
+    if type(prettyui) == "table" and type(prettyui.IsClassicUI) == "function" then
+        local ok, classic = pcall(function() return prettyui.IsClassicUI() end)
+        if ok and type(classic) == "boolean" then
+            return classic and "classic" or "modern", "prettyui.IsClassicUI()=" .. tostring(classic)
+        end
+    end
+    local ok, value = pcall(function() return var.VarPlayer["TOPLEVEL_V2_LEGACY_INTERFACE"].value end)
+    if not ok or type(value) ~= "number" then
+        return "unknown", "TOPLEVEL_V2_LEGACY_INTERFACE=unavailable"
+    end
+    local mode = value == 1 and "classic" or (value == 0 and "modern" or "unknown")
+    return mode, "TOPLEVEL_V2_LEGACY_INTERFACE=" .. tostring(value)
 end
 
 -- Report mode detection only when debug logging is enabled.
 function BankWindow.LogInterfaceMode()
     if not DebugLog.IsEnabled() then return end
-    local mode, value = interfaceMode()
-    debugLog("Bank Core interface mode: ", mode, " (TOPLEVEL_V2_SKINS_VARP=", value,
+    local mode, source = interfaceMode()
+    debugLog("Bank Core interface mode: ", mode, " (", source,
         "); sidebar layout: ", mode == "classic" and "detached" or "integrated")
 end
 
