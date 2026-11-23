@@ -82,8 +82,9 @@ collapsed modes; the keybind is disabled when the sidebar starts Expanded.
 **Peek Rail** keybind (default **Shift**) to reveal the rail and release to retract it. Selecting a
 plugin or opening settings keeps that selection visible after you release the key.
 The two keybind fields sit side by side and retain their values when disabled.
-They must use different shortcuts. PrettyUI input capture and blocked keyboard
-input suppress these shortcuts.
+They must use different shortcuts. PrettyUI input capture, blocked keyboard
+input, and plugin overlays using Core's keybind suspension API suppress these
+shortcuts.
 
 Debug logging and geometry recovery are under **Developer settings**, with
 instructions for repositioning and resetting the bank.
@@ -125,6 +126,10 @@ Use [`bankcore.SanitizeString(text)`](docs/API.md#sanitize-player-text) before
 saving or displaying player text from sharecodes or manual entry. It strips
 game text tags, including inline images and sprites that can crash the client
 when their IDs are invalid. Sanitize existing stored text on display as well.
+
+Use [`ext:SuspendKeybinds([label])`](docs/API.md#suspend-core-keybinds) while
+displaying modal windows or editors over the bank so overlay shortcuts such as
+`Ctrl+C` and `Ctrl+V` do not trigger Core's sidebar shortcuts behind them.
 
 - [API reference](docs/API.md): register a sidebar, supply an item page or draw a custom
   view, and read menus.

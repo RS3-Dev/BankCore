@@ -113,7 +113,7 @@ It is available without registering an extension.
 `bankcore.Register(spec)` returns an extension handle, or `nil, reason, detail`.
 The root API provides `Register` and `SanitizeString`. The handle provides `SetPage`, `Refresh`,
 `Open`, `Close`, `IsOpen`, `GetBankItems`, `GetBankBounds`, `GetBankState`, `HighlightAllItems`,
-`GetMenuItem` and `Dispose`. Both are plain tables of functions, suitable for the client's copied
+`SuspendKeybinds`, `GetMenuItem` and `Dispose`. Both are plain tables of functions, suitable for the client's copied
 dependency exports; they expose no session or real bank component.
 
 ```lua
@@ -731,6 +731,235 @@ with pending inventory notifications. A later inventory update remains a
 fallback if the native order changes after the drop callback. Leaving the page
 or closing the bank cancels that queued work. This does not use native drag
 coordinates, perform a drop itself, or provide plugins with drop callbacks.
+
+## Suspend Core keybinds
+
+Bank Core polls its own keyboard shortcuts on every logic tick while the bank
+is open — currently **Expand Sidebar** (default `Ctrl`) and **Peek Rail**
+(default `Shift`). When a plugin opens a modal window, editor or blocking
+overlay on top of the bank, shortcuts meant for that overlay (such as `Ctrl+C`,
+`Ctrl+V`, `Ctrl+Z`, `Ctrl+Y` or `Shift`-click inside an editor) can also match
+Core's shortcuts and expand, collapse or shift the hidden bank window beneath
+it.
+
+Call `ext:SuspendKeybinds([label])` while an overlay covers the bank or owns
+keyboard shortcuts, and release the returned hold when that overlay closes.
+
+### When to use it (and when not to)
+
+Use `SuspendKeybinds` when your plugin displays UI over the bank where Core's
+shortcuts should not react:
+
+- Full-bank or modal editors with their own shortcuts (for example, Bank Tags'
+  layout editor using `Ctrl+C`/`Ctrl+V`/`Ctrl+Z` or `Shift` selection).
+- Confirmation prompts, import/share windows, pickers or plugin settings modals
+  rendered on top of the bank.
+- Custom drag or shortcut modes where holding `Ctrl`, `Shift` or another bound
+  key would otherwise toggle the sidebar behind the user's cursor.
+
+Do **not** hold a suspension during normal bank browsing:
+
+- Do not suspend keybinds simply because your sidebar column is mounted or your
+  plugin page/custom view is displayed in the bank — players still expect
+  **Expand Sidebar** and **Peek Rail** to work while browsing bank pages.
+- Do not acquire a permanent hold at plugin startup.
+- You do **not** need `SuspendKeybinds` solely for focused text boxes or
+  PrettyUI `KeybindField` inputs: Core already suppresses its shortcuts whenever
+  `Keyboard.IsBlocked()` or `prettyui.KeybindField.IsCapturing()` is true.
+  `SuspendKeybinds` covers everything outside focused text input, such as
+  overlay windows handling `Event.KeyDown` shortcuts directly.
+
+### Acquire and release a hold
+
+```lua
+local hold, reason, detail = ext:SuspendKeybinds("layout editor")
+```
+
+- `label` (optional): 1–80 plain-text characters without control characters or
+  `<`/`>` brackets. Core includes this label alongside your extension ID in
+  debug logs to make it easy to see which overlay owns each active hold.
+- On success, returns a plain lease handle table with two functions:
+  - `hold:Release()`: releases this specific hold and returns `true`. Safe to
+    call repeatedly and safe after `ext:Dispose()`, extension replacement or
+    Core reload/shutdown. Releasing a hold never affects another overlay's or
+    another plugin's hold.
+  - `hold:IsActive()`: returns `true` while this hold is still active on its
+    live extension, or `false` after `hold:Release()`, `ext:Dispose()`,
+    replacement or permanent Core shutdown.
+- On refusal, returns `nil, reason, detail`:
+  - `stale`: the extension handle was disposed, replaced or permanently closed.
+  - `invalid` (with `detail`): `label` was supplied but is not a valid 1–80
+    character plain-text string.
+  - `limit` (with `detail`): this extension already holds the maximum of 32
+    simultaneous active suspensions. This cap protects against accidentally
+    calling `SuspendKeybinds` inside a tick, draw or reposition loop.
+
+### Scope, overlap and held-key behavior
+
+- **Core shortcuts only:** Suspending keybinds pauses Core's own shortcut
+  polling (**Expand Sidebar**, **Peek Rail** and any future Core keybinds). It
+  does **not** change `Keyboard.IsBlocked()` and does **not** block native game
+  keys or other plugins' `Event.KeyDown` handlers.
+- **Active rail peek retracts:** If the player is currently holding **Peek
+  Rail** in Fully collapsed mode when a hold begins, Core retracts the peeked
+  rail on the next logic tick and keeps it closed while suspended.
+- **Independent leases across windows and plugins:** Every call returns an
+  independent hold. If one plugin opens an editor and then opens a confirmation
+  dialog over it, each window can hold its own lease; closing the child dialog
+  releases only the child's hold while the parent's hold keeps Core suspended.
+  Similarly, if two plugins hold leases at the same time, Core stays suspended
+  until every live lease has been released (or its owning extension is
+  disposed).
+- **No accidental fire on resume:** When the final active hold is released (or
+  cleared on disposal), Core latches its shortcuts as held until the bound keys
+  are physically released and pressed again. Closing a modal with a shortcut
+  like `Ctrl+W`, `Ctrl+Enter` or `Shift+Esc` — or clicking Close while still
+  holding `Ctrl` or `Shift` — will not toggle the sidebar or peek the rail on
+  the next tick.
+
+### Lifecycle and cleanup guarantees
+
+- **Callable anytime while live:** `ext:SuspendKeybinds()` does not require the
+  bank to be open and never returns `busy`, even inside `mount`, `unmount`,
+  `customView` or other callbacks. Acquiring a hold before the bank opens keeps
+  Core keybinds suspended if the bank opens while your overlay is still on
+  screen.
+- **Not auto-cleared on bank close:** Closing the bank does **not** release
+  active holds, so standalone overlays (such as an import or settings dialog)
+  that remain open across a bank close/reopen stay protected. For bank-tied
+  overlays, always close the overlay and call `hold:Release()` in both the
+  overlay's teardown (`Destroy` / `onClose`) and `onBankClose`.
+- **Automatic cleanup on dispose or replacement:** Calling `ext:Dispose()` or
+  re-registering the same extension ID immediately releases all active holds
+  owned by that extension so an unloaded, crashed or reloaded plugin cannot
+  leave Core keybinds permanently disabled.
+- **Core reload retention:** Across Core session reloads (`prl bankcore`),
+  retained extensions keep any holds that were not released during
+  `onBankClose`, and existing `hold:Release()` / `hold:IsActive()` handles keep
+  working against the new Core session.
+
+### Examples
+
+#### Modal editor window (single overlay)
+
+Check `ext.SuspendKeybinds ~= nil` if your plugin supports older Core releases
+without this method, store the hold on the window, and release it from one
+idempotent cleanup helper called by every exit path:
+
+```lua
+local EditorWindow = {}
+
+function EditorWindow:ReleaseKeybinds()
+    if self.keybindHold ~= nil then
+        self.keybindHold:Release()
+        self.keybindHold = nil
+    end
+end
+
+function EditorWindow.Open(ext, parent)
+    local self = setmetatable({}, { __index = EditorWindow })
+    if ext ~= nil and ext.SuspendKeybinds ~= nil then
+        self.keybindHold = ext:SuspendKeybinds("layout editor")
+    end
+
+    local ok, err = pcall(function()
+        self.window = prettyui.Window.new(parent, {
+            title = "Layout Editor",
+            destroyOnClose = true,
+            onClose = function() self:Destroy(true) end,
+        })
+        -- Register Event.KeyDown for Ctrl+C / Ctrl+V / Ctrl+Z here.
+    end)
+    if not ok then
+        -- Always release if construction fails before the window opens.
+        self:ReleaseKeybinds()
+        error(err)
+    end
+    return self
+end
+
+function EditorWindow:Destroy(fromWindowClose)
+    if self.destroyed then return end
+    self.destroyed = true
+    self:ReleaseKeybinds()
+    -- Unsubscribe Event.KeyDown and destroy window if not already closing.
+    if not fromWindowClose and self.window ~= nil then
+        self.window:Destroy()
+    end
+    self.window = nil
+end
+```
+
+Also close bank-tied windows from `onBankClose` and `PluginShutdown` so the
+hold is always released promptly:
+
+```lua
+local editor
+local ext = bankcore.Register({
+    id = "example.editor",
+    name = "Editor",
+    icon = "STAR",
+    onBankClose = function()
+        if editor ~= nil then
+            editor:Destroy()
+            editor = nil
+        end
+    end,
+})
+
+function PluginShutdown()
+    if editor ~= nil then
+        editor:Destroy()
+        editor = nil
+    end
+    if ext ~= nil then
+        ext:Dispose()
+        ext = nil
+    end
+end
+```
+
+#### Nested dialogs (multiple overlapping overlays)
+
+Each overlay manages its own hold without coordinating a manual counter:
+
+```lua
+local editorHold = ext:SuspendKeybinds("layout editor")
+
+-- Later, while the editor is still open, show a confirmation dialog on top:
+local confirmHold = ext:SuspendKeybinds("confirm delete")
+
+-- When the confirmation dialog closes:
+confirmHold:Release()
+-- confirmHold:IsActive() is now false, while editorHold:IsActive() is still true
+-- and Bank Core keybinds remain suspended until editorHold:Release() runs.
+
+-- Even calling confirmHold:Release() again is a safe no-op.
+confirmHold:Release()
+
+-- When the editor itself closes:
+editorHold:Release()
+-- Now all holds are released and Bank Core keybinds resume on the next fresh press.
+```
+
+### Best practices and debugging
+
+- **Acquire once per open overlay:** Store the returned hold on the overlay
+  instance rather than calling `ext:SuspendKeybinds()` inside `Show()`,
+  `Event.Logic`, `Event.Draw` or `customView`. If a window can be hidden and
+  shown repeatedly, release on hide and acquire on show (only when
+  `self.keybindHold == nil`).
+- **Guard construction failures:** If building the window can throw an error
+  after acquiring a hold, wrap construction in `pcall` (or acquire right after
+  construction succeeds) so a failed open cannot leak a hold.
+- **Pass a short `label`:** Passing a descriptive label like `"layout editor"`
+  or `"import modal"` makes Core's debug logs immediately actionable.
+- **Diagnosing stuck keybinds:** Enable **Enable debug** in Bank Core Settings.
+  Core logs each acquire, release and automatic dispose cleanup with the
+  extension ID, label and remaining active hold count:
+  - `Bank Core suspended keybinds for <id> (<label>); active holds=<n>`
+  - `Bank Core released keybind hold for <id> (<label>); active holds=<n>`
+  - `Bank Core cleared <k> active keybind hold(s) on dispose for <id> (<labels>); active holds=<n>`
 
 ## Known limitations
 
