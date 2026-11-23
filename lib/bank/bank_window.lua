@@ -43,14 +43,30 @@ local CENTRED_DIALOGS = {
 local BANK_ITEMS_COMPONENT_ID = BankInterface.ITEMS
 local BANK_ITEMS_CONTAINER_COMPONENT_ID = BankInterface.ITEMS_CONTAINER
 local ALL_TAB_BUTTON_COMPONENT_ID = id.Component.BANK__ALL_TAB_BTN
+local ALL_TAB_CONTAINER_COMPONENT_ID = id.Component.BANK__TABS_ALL_BUTTON
 local ALL_TAB_BUTTON_CATEGORY_ID = 0
 local ALL_TAB_BUTTON_DYNAMIC_ID = 0
 local CANCEL_CONTROL_COMPONENT_ID = id.Component.BANK__BOTTOM_PANEL_CANCEL
 local CANCEL_LABEL_CATEGORY_ID = 0
 local CANCEL_LABEL_DYNAMIC_ID = 9
 local PRESET_CLOSE_BUTTON_COMPONENT_ID = id.Component.BANK__PRESET_CLOSE
-local ALL_TAB_SELECTED_SPRITE_ID = id.Sprite.BANK_TABS_HORIZONTAL_1
-local ALL_TAB_UNSELECTED_SPRITE_ID = id.Sprite.BANK_TABS_HORIZONTAL_0
+
+local function registerTabSprites(selectionBySprite, selected, unselected)
+    if selected ~= nil and unselected ~= nil and selected ~= unselected then
+        selectionBySprite[selected] = true
+        selectionBySprite[unselected] = false
+    end
+end
+
+local ALL_TAB_SELECTION_BY_SPRITE = {}
+registerTabSprites(ALL_TAB_SELECTION_BY_SPRITE,
+    id.Sprite.BANK_TABS_HORIZONTAL_1, id.Sprite.BANK_TABS_HORIZONTAL_0)
+registerTabSprites(ALL_TAB_SELECTION_BY_SPRITE,
+    id.Sprite.BANK_TABS_HORIZONTAL_LEGACY_1, id.Sprite.BANK_TABS_HORIZONTAL_LEGACY_0)
+registerTabSprites(ALL_TAB_SELECTION_BY_SPRITE,
+    id.Sprite.BANK_TABS_VERTICAL_3, id.Sprite.BANK_TABS_VERTICAL_4)
+registerTabSprites(ALL_TAB_SELECTION_BY_SPRITE,
+    id.Sprite.BANK_TABS_VERTICAL_LEGACY_3, id.Sprite.BANK_TABS_VERTICAL_LEGACY_4)
 -- The game has no window move or resize events.
 local BANK_WINDOW_CHECK_TICKS = 10
 
@@ -802,19 +818,52 @@ function BankWindow:IsNativeViewAll()
     return self.nativeViewAll == true
 end
 
-function BankWindow:DetectNativeViewAll()
-    -- The first child shows whether the tab is selected.
-    local tabBackground = dynamicComponent(
-        ALL_TAB_BUTTON_COMPONENT_ID,
+local function readTabSpriteSelection(target)
+    if target == nil then return nil end
+    local okHidden, hidden = pcall(function() return target.hidden end)
+    if okHidden and hidden == true then return nil end
+    local okSprite, spriteID = pcall(function() return target.spriteID end)
+    if not okSprite or spriteID == nil then return nil end
+    return ALL_TAB_SELECTION_BY_SPRITE[spriteID]
+end
+
+local function findTabSpriteInTree(node, depth)
+    if node == nil or depth > 4 then return nil end
+    local okHidden, hidden = pcall(function() return node.hidden end)
+    if okHidden and hidden == true then return nil end
+    local selected = readTabSpriteSelection(node)
+    if selected ~= nil then return selected end
+    if node.IterateDynamicComponents == nil then return nil end
+    local found = nil
+    pcall(function()
+        node:IterateDynamicComponents(function(child)
+            local childSelected = findTabSpriteInTree(child, depth + 1)
+            if childSelected ~= nil then
+                found = childSelected
+                return true
+            end
+            return false
+        end)
+    end)
+    return found
+end
+
+local function inspectAllTabComponent(componentID)
+    if componentID == nil then return nil end
+    -- Fast path: the first dynamic child usually holds the tab background sprite.
+    local selected = readTabSpriteSelection(dynamicComponent(
+        componentID,
         ALL_TAB_BUTTON_CATEGORY_ID,
         ALL_TAB_BUTTON_DYNAMIC_ID
-    )
-    if tabBackground == nil then return nil end
+    ))
+    if selected ~= nil then return selected end
+    return findTabSpriteInTree(component(componentID), 0)
+end
 
-    local spriteID = tabBackground.spriteID
-    if spriteID == ALL_TAB_SELECTED_SPRITE_ID then return true end
-    if spriteID == ALL_TAB_UNSELECTED_SPRITE_ID then return false end
-    return nil
+function BankWindow:DetectNativeViewAll()
+    local selected = inspectAllTabComponent(ALL_TAB_BUTTON_COMPONENT_ID)
+    if selected ~= nil then return selected end
+    return inspectAllTabComponent(ALL_TAB_CONTAINER_COMPONENT_ID)
 end
 
 -- Restore and save the window before reporting cleanup errors.
