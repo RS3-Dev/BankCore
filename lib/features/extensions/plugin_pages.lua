@@ -8,6 +8,7 @@ local debugLog = require("lib/core/debug_log").Write
 local ExtensionMounts = require("lib/features/extensions/extension_mounts")
 local PageLayout = require("lib/features/extensions/page_layout")
 local PlainData = require("lib/features/extensions/plain_data")
+local AllItemsHint = require("lib/ui/all_items_hint")
 
 local PluginPages = {}
 PluginPages.__index = PluginPages
@@ -122,18 +123,23 @@ function PluginPages.new(bankView, options)
     local eventSuffix = ":" .. string.match(tostring(self), "%x+$")
     self.refreshEvent = REFRESH_EVENT .. eventSuffix
     self.notifyEvent = NOTIFY_EVENT .. eventSuffix
+    self.allItemsHint = AllItemsHint.new(function() return self:CanShowAllItemsHint() end)
     bankView.onChange = function() self:Notify() end
+    bankView.onClearAllItemsHint = function() self:ClearAllItemsHint() end
     return self
 end
 
 -- Attach retained registrations to a fresh bank session after Core reloads.
 function PluginPages.Attach(self, bankView, options)
     setmetatable(self, PluginPages)
+    self:ClearAllItemsHint()
     self.layout = bankView
     self.isInGame, self.bankIsOpen = options.isInGame, options.bankIsOpen
     self.suspended, self.closed = false, false
     self.pluginCallbacks = 0
+    self.allItemsHint = AllItemsHint.new(function() return self:CanShowAllItemsHint() end)
     bankView.onChange = function() self:Notify() end
+    bankView.onClearAllItemsHint = function() self:ClearAllItemsHint() end
     for _, extension in pairs(self.owners) do
         extension.heardState, extension.heardItems = nil, nil
         extension.shown, extension.bankClosed, extension.redrawPending = false, false, false
@@ -157,6 +163,32 @@ end
 
 function PluginPages:ViewAll()
     return self.layout:IsNativeViewAll()
+end
+
+function PluginPages:CanShowAllItemsHint()
+    if self.closed or not self:BankReady() then return false end
+    local layout = self.layout
+    if layout == nil then return false end
+    if layout.shownPage ~= nil and layout.shownPage ~= layout.settingsPage then return false end
+    if layout:IsPresetViewOpen() then return false end
+    if layout:ReadNativeFilterMode() ~= nil then return false end
+    if self:ViewAll() then return false end
+    return true
+end
+
+function PluginPages:ShowAllItemsHint()
+    if not self:CanShowAllItemsHint() then
+        self:ClearAllItemsHint()
+        return false
+    end
+    if self.allItemsHint == nil then
+        self.allItemsHint = AllItemsHint.new(function() return self:CanShowAllItemsHint() end)
+    end
+    return self.allItemsHint:Show()
+end
+
+function PluginPages:ClearAllItemsHint()
+    if self.allItemsHint ~= nil then self.allItemsHint:Clear() end
 end
 
 -- Explain why the page cannot open, or return nil.
@@ -360,7 +392,14 @@ function PluginPages:Open(extension)
     if not self:IsLive(extension) then return false, "stale" end
     if extension.page == nil then return false, "no_page" end
     local blockedReason = self:OpenBlocker()
-    if blockedReason ~= nil then return false, blockedReason end
+    if blockedReason ~= nil then
+        if blockedReason == "not_all_items" then
+            self:ShowAllItemsHint()
+        elseif blockedReason == "preset_open" or blockedReason == "bank_closed" then
+            self:ClearAllItemsHint()
+        end
+        return false, blockedReason
+    end
     -- Start each new opening at the top.
     extension.redrawPending = false
     extension.opens = extension.opens + 1
@@ -369,6 +408,7 @@ function PluginPages:Open(extension)
     -- A failed page returns to the normal bank.
     if not ok or not shown then return false, "failed" end
     extension.shown = true
+    self:ClearAllItemsHint()
     return true
 end
 
@@ -460,6 +500,7 @@ end
 
 -- Send one close notification per bank opening on the next game update.
 function PluginPages:BankClosed()
+    self:ClearAllItemsHint()
     if self.closed or self.suspended or not self.layout.active then return end
     for _, extension in pairs(self.owners) do extension.bankClosed = true end
     self:DeselectExtension(self.selectedExtension)
@@ -524,6 +565,9 @@ end
 
 -- Notify registered plugins in ID order.
 function PluginPages:DeliverChanges()
+    if self.allItemsHint ~= nil and self.allItemsHint:IsActive() and not self:CanShowAllItemsHint() then
+        self:ClearAllItemsHint()
+    end
     self:DeliverSelectionChanges()
     local extensionIDs = {}
     for extensionID in pairs(self.owners) do extensionIDs[#extensionIDs + 1] = extensionID end
@@ -538,7 +582,9 @@ end
 -- Release session references while retaining registrations and prepared pages.
 function PluginPages:Suspend()
     if self.closed or self.suspended then return end
+    self:ClearAllItemsHint()
     local layout = self.layout
+    if layout ~= nil then layout.onClearAllItemsHint = nil end
     local shown = layout.shownPage
     local owners = {}
     for _, extension in pairs(self.owners) do owners[#owners + 1] = extension end
@@ -561,6 +607,7 @@ end
 -- Close all plugins and clear tabs before permanent disposal.
 function PluginPages:Close()
     if self.closed then return end
+    self:ClearAllItemsHint()
     if self.suspended then
         self.owners = {}
         self.closed = true
@@ -579,6 +626,7 @@ function PluginPages:Close()
     Event.Logic.Unsubscribe(self.refreshEvent)
     Event.Logic.Unsubscribe(self.notifyEvent)
     self.closed = true
+    if self.layout ~= nil then self.layout.onClearAllItemsHint = nil end
     self.layout = nil
     self:DeselectExtension(self.selectedExtension)
     for _, extension in ipairs(extensionsToClose) do

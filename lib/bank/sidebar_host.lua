@@ -180,6 +180,7 @@ end
 
 -- Remove the sidebar and its contents.
 function SidebarHost:DestroySidebar()
+    if self.ClearAllItemsHint ~= nil then pcall(function() self:ClearAllItemsHint() end) end
     local closed, closeError = pcall(function() self:CloseTabMount() end)
     self.emptyLabel = nil
     local destroyed, destroyError = pcall(SidebarFrame.Destroy, self)
@@ -217,6 +218,7 @@ function SidebarHost:IsSidebarHidden()
 end
 
 function SidebarHost:SetSidebarOpeningState(state)
+    if self.ClearAllItemsHint ~= nil then self:ClearAllItemsHint() end
     self.sidebarOpeningState = state
     self.peekRail = false
     if not self.active and state ~= "expanded" then self.sidebarMode = nil end
@@ -263,6 +265,7 @@ function SidebarHost:ToggleSidebarExpansion()
     if self:FindSidebarTab(self.sidebarMode) == nil then return self:SelectFirstSidebarTab() end
     if self.shownPage ~= nil and not self:ReturnToBank() then return false end
     self.sidebarMode, self.peekRail = nil, false
+    if self.ClearAllItemsHint ~= nil then self:ClearAllItemsHint() end
     self:RefreshSidebar()
     self:UpdateLayoutControls()
     self:Changed(false)
@@ -299,6 +302,7 @@ function SidebarHost:SetSidebarMode(selectedTabID)
         return
     end
     self.sidebarMode = selectedTabID
+    if self.ClearAllItemsHint ~= nil then self:ClearAllItemsHint() end
     self:UpdateLayoutControls()
     self:RefreshSidebar()
     self:Changed(false)
@@ -306,10 +310,14 @@ end
 
 -- Keep the selected tab unless it was removed.
 function SidebarHost:SetExtensionTabs(tabs)
+    local previousMode = self.sidebarMode
     self.extensionTabs = sortByRailOrder(tabs, self.readRailOrder())
     local selected = self:FindSidebarTab(self.sidebarMode)
     if selected == nil and self.sidebarMode ~= SETTINGS_MODE then
         self.sidebarMode = self.sidebarOpeningState == "expanded" and self:FirstSidebarTab() or nil
+    end
+    if self.sidebarMode ~= previousMode and self.ClearAllItemsHint ~= nil then
+        self:ClearAllItemsHint()
     end
     self:UpdateLayoutControls()
     self:RefreshSidebar()
