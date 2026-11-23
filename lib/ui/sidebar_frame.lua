@@ -107,6 +107,7 @@ function SidebarFrame.Create(bankView, parent, height, x, y, actions)
         bankView.sidebarCollapsedHeader.hidden = true
         -- Stretch every title section equally so their bottom borders meet.
         bankView.sidebarTitle = prettyui.Text.new(bankView.sidebarHeader, {
+            categoryID = "auto",
             text = "Bank Plugins", x = 8, y = 4,
             width = fullWidth - 16, height = 34,
             font = id.Font.CINZEL_13PT_BOLD, colour = 0xF2C66DFF,
