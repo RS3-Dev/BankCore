@@ -23,8 +23,14 @@ local CALLBACKS = { "customView", "onSelect", "onDeselect", "onClose", "onBankIt
 local PAGE_FIELDS = { title = true, rows = true, allowNativeDrag = true }
 local ID_LENGTH = 64
 local TEXT_LENGTH = 80
+local MAX_KEYBIND_SUSPENSIONS = 32
 
 local hasOnlyFields = PlainData.HasOnlyFields
+
+local function formatSuspensionLabel(extension, label)
+    if label ~= nil then return extension.id .. " (" .. label .. ")" end
+    return extension.id
+end
 
 -- A plugin's error must not stop other plugins.
 local function callExtensionCallback(extension, name, ...)
@@ -113,10 +119,12 @@ function PluginPages.new(bankView, options)
         layout = bankView,
         isInGame = options.isInGame,
         bankIsOpen = options.bankIsOpen,
+        onKeybindResumed = options.onKeybindResumed,
         owners = {},
         -- Wait for plugin drawing to finish before changing tabs.
         pluginCallbacks = 0,
         publishPending = false,
+        keybindSuspensionCount = 0,
         closed = false,
     }, PluginPages)
     -- Unique event names prevent reloads from removing another session's event handlers.
@@ -135,6 +143,8 @@ function PluginPages.Attach(self, bankView, options)
     self:ClearAllItemsHint()
     self.layout = bankView
     self.isInGame, self.bankIsOpen = options.isInGame, options.bankIsOpen
+    self.onKeybindResumed = options.onKeybindResumed
+    self.keybindSuspensionCount = self.keybindSuspensionCount or 0
     self.suspended, self.closed = false, false
     self.pluginCallbacks = 0
     self.allItemsHint = AllItemsHint.new(function() return self:CanShowAllItemsHint() end)
@@ -207,6 +217,82 @@ function PluginPages:HighlightAllItems(extension)
     end
     if not self:ShowAllItemsHint() then return false, "unavailable" end
     return true
+end
+
+function PluginPages:HasKeybindSuspensions()
+    return not self.closed and (self.keybindSuspensionCount or 0) > 0
+end
+
+function PluginPages:NotifyKeybindsResumed()
+    if self.onKeybindResumed ~= nil then pcall(self.onKeybindResumed) end
+end
+
+-- Acquire an independent keybind suspension hold tied to this extension's lifetime.
+function PluginPages:SuspendKeybinds(extension, label)
+    if not self:IsLive(extension) then return nil, "stale" end
+    local normalizedLabel = nil
+    if label ~= nil then
+        normalizedLabel = PlainData.Label(label, TEXT_LENGTH)
+        if normalizedLabel == nil then
+            return nil, "invalid", "label must be 1 to " .. TEXT_LENGTH .. " characters when provided"
+        end
+    end
+    extension.keybindSuspensions = extension.keybindSuspensions or {}
+    extension.keybindSuspensionCount = extension.keybindSuspensionCount or 0
+    if extension.keybindSuspensionCount >= MAX_KEYBIND_SUSPENSIONS then
+        return nil, "limit", "an extension can hold at most " .. MAX_KEYBIND_SUSPENSIONS .. " active keybind suspensions"
+    end
+    local token = {}
+    extension.keybindSuspensions[token] = normalizedLabel or true
+    extension.keybindSuspensionCount = extension.keybindSuspensionCount + 1
+    self.keybindSuspensionCount = (self.keybindSuspensionCount or 0) + 1
+    debugLog("Bank Core suspended keybinds for ", formatSuspensionLabel(extension, normalizedLabel),
+        "; active holds=", self.keybindSuspensionCount)
+    return token
+end
+
+function PluginPages:IsKeybindSuspensionActive(extension, token)
+    if token == nil or not self:IsLive(extension) then return false end
+    return extension.keybindSuspensions ~= nil and extension.keybindSuspensions[token] ~= nil
+end
+
+function PluginPages:ReleaseKeybindSuspension(extension, token)
+    if token == nil or extension == nil or extension.keybindSuspensions == nil then return true end
+    local entry = extension.keybindSuspensions[token]
+    if entry == nil then return true end
+    extension.keybindSuspensions[token] = nil
+    extension.keybindSuspensionCount = math.max(0, (extension.keybindSuspensionCount or 1) - 1)
+    local previous = self.keybindSuspensionCount or 0
+    self.keybindSuspensionCount = math.max(0, previous - 1)
+    local label = type(entry) == "string" and entry or nil
+    debugLog("Bank Core released keybind hold for ", formatSuspensionLabel(extension, label),
+        "; active holds=", self.keybindSuspensionCount)
+    if previous > 0 and self.keybindSuspensionCount == 0 then
+        self:NotifyKeybindsResumed()
+    end
+    return true
+end
+
+function PluginPages:ClearKeybindSuspensions(extension, reason)
+    if extension == nil or extension.keybindSuspensions == nil then return end
+    local cleared = 0
+    local labels = {}
+    for token, entry in pairs(extension.keybindSuspensions) do
+        extension.keybindSuspensions[token] = nil
+        cleared = cleared + 1
+        if type(entry) == "string" then labels[#labels + 1] = entry end
+    end
+    extension.keybindSuspensionCount = 0
+    if cleared == 0 then return end
+    local previous = self.keybindSuspensionCount or 0
+    self.keybindSuspensionCount = math.max(0, previous - cleared)
+    table.sort(labels)
+    local detail = #labels > 0 and (" (" .. table.concat(labels, ", ") .. ")") or ""
+    debugLog("Bank Core cleared ", cleared, " active keybind hold(s) on ", reason or "dispose",
+        " for ", extension.id, detail, "; active holds=", self.keybindSuspensionCount)
+    if previous > 0 and self.keybindSuspensionCount == 0 then
+        self:NotifyKeybindsResumed()
+    end
 end
 
 -- Explain why the page cannot open, or return nil.
@@ -329,7 +415,8 @@ function PluginPages:RegisterOwner(description)
     local previous = self.owners[registration.id]
     if previous ~= nil then self:DisposeOwner(previous, true) end
     local extension = { id = registration.id, name = registration.name, icon = registration.icon, callbacks = registration,
-        page = nil, opens = 0, shown = false, heardItems = nil, bankClosed = false }
+        page = nil, opens = 0, shown = false, heardItems = nil, bankClosed = false,
+        keybindSuspensions = {}, keybindSuspensionCount = 0 }
     if registration.column ~= nil then extension.mount = ExtensionMounts.new(self, extension, registration.column) end
     -- Custom views can open immediately.
     local customView = registration.customView
@@ -354,6 +441,7 @@ end
 function PluginPages:DisposeOwner(extension, replaced)
     if not self:IsLive(extension) then return true end
     self.owners[extension.id] = nil
+    self:ClearKeybindSuspensions(extension, replaced and "replace" or "dispose")
     self:DeselectExtension(extension)
     local page = self:ShownPage(extension)
     if page ~= nil then page.title, page.rows, page.draw = "", {}, nil end
@@ -607,6 +695,7 @@ function PluginPages:Suspend()
     local owners = {}
     for _, extension in pairs(self.owners) do owners[#owners + 1] = extension end
     self.suspended, self.layout, self.menuRouter = true, nil, nil
+    self.onKeybindResumed = nil
     self:DeselectExtension(self.selectedExtension)
     self.isInGame, self.bankIsOpen = nil, nil
     Event.Logic.Unsubscribe(self.refreshEvent)
@@ -626,6 +715,11 @@ end
 function PluginPages:Close()
     if self.closed then return end
     self:ClearAllItemsHint()
+    self.onKeybindResumed = nil
+    for _, extension in pairs(self.owners) do
+        self:ClearKeybindSuspensions(extension, "close")
+    end
+    self.keybindSuspensionCount = 0
     if self.suspended then
         self.owners = {}
         self.closed = true

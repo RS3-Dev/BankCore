@@ -2,6 +2,13 @@
 
 local PublicAPI = {}
 
+local function createKeybindHoldHandle(pluginPages, extension, token)
+    return {
+        Release = function() return pluginPages:ReleaseKeybindSuspension(extension, token) end,
+        IsActive = function() return pluginPages:IsKeybindSuspensionActive(extension, token) end,
+    }
+end
+
 local function createExtensionHandle(pluginPages, extension)
     return {
         SetPage = function(_, page) return pluginPages:SetPage(extension, page) end,
@@ -13,6 +20,11 @@ local function createExtensionHandle(pluginPages, extension)
         GetBankBounds = function() return pluginPages:BankBounds(extension) end,
         GetBankState = function() return pluginPages:BankState(extension) end,
         HighlightAllItems = function() return pluginPages:HighlightAllItems(extension) end,
+        SuspendKeybinds = function(_, label)
+            local token, reason, detail = pluginPages:SuspendKeybinds(extension, label)
+            if token == nil then return nil, reason, detail end
+            return createKeybindHoldHandle(pluginPages, extension, token)
+        end,
         GetMenuItem = function(_, menu)
             local router = pluginPages.menuRouter
             if router == nil or not pluginPages:IsLive(extension) then return nil end

@@ -121,6 +121,7 @@ function BankSession.new(options)
     local pageOptions = {
         isInGame = function() return session.inGame end,
         bankIsOpen = bankIsOpen,
+        onKeybindResumed = function() session:ResetKeybindLatches() end,
     }
     if options.pluginPages ~= nil then
         session.pluginPages = PluginPages.Attach(options.pluginPages, session.layout, pageOptions)
@@ -332,8 +333,23 @@ function BankSession:SetRailPeekKeybindPreference(value)
     return self:SaveSidebarKeybind("railPeekKeybind", value)
 end
 
+function BankSession:AreKeybindsSuspended()
+    return self.pluginPages ~= nil and self.pluginPages.HasKeybindSuspensions ~= nil
+        and self.pluginPages:HasKeybindSuspensions() == true
+end
+
+function BankSession:ResetKeybindLatches()
+    self.sidebarKeybindDown = true
+    self.railPeekKeybindDown = true
+end
+
 -- Expand fires once per press; Peek remains visible only while its chord is held.
 function BankSession:CheckSidebarKeybind()
+    if self:AreKeybindsSuspended() then
+        self:ResetKeybindLatches()
+        if not self.shutDown and self.layout ~= nil and self.layout.peekRail then self.layout:SetRailPeek(false) end
+        return
+    end
     local function pressed(key, latch)
         local binding = self.preferences[key] or {}
         local down = #binding > 0 and prettyui.KeybindField.IsDown(binding)
