@@ -54,7 +54,7 @@ function Mount:Open(hostParent, window, bounds)
     local built, problem = pcall(function()
         columnContext.parent = ui.Layer.new(hostParent)
         columnContext.parent:SetPos(bounds.x, bounds.y)
-        columnContext.parent:SetSize(bounds.width, bounds.height)
+        columnContext.parent:SetSize(-bounds.x * 2, -bounds.y * 2, 1.0, 1.0)
         columnContext.overlay = ui.Layer.new(window)
         columnContext.overlay:SetPos(0, 0)
         columnContext.overlay:SetSize(0, 0, 1.0, 1.0)
@@ -95,7 +95,7 @@ function Mount:Resize(bounds)
     self.bounds = bounds
     self.values.width, self.values.height = bounds.width, bounds.height
     self.values.parent:SetPos(bounds.x, bounds.y)
-    self.values.parent:SetSize(bounds.width, bounds.height)
+    self.values.parent:SetSize(-bounds.x * 2, -bounds.y * 2, 1.0, 1.0)
     self.service:RunPluginCallback(self.owner, "resize", self.callbacks.resize, self.values)
 end
 

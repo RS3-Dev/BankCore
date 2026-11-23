@@ -33,6 +33,11 @@ function SidebarFrame.PluginRailHeight(height)
     return math.max(0, height - SETTINGS_SPACE)
 end
 
+-- Compute the parent-anchored column height before the client lays out rail.
+function SidebarFrame.ColumnHeight(rootHeight, y)
+    return math.max(0, rootHeight - y - HEADER_HEIGHT - SETTINGS_BOTTOM_INSET)
+end
+
 -- BankView calls the icon strip tabRail and the content column rail.
 function SidebarFrame.Create(bankView, parent, height, x, y, actions)
     -- Own the whole subtree before constructors run, so partial builds can be removed.

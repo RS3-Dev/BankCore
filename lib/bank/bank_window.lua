@@ -612,11 +612,48 @@ local function describeBankWindowMeasurements(bankWindowMeasurements)
     return table.concat({ bankWindowMeasurements.columns, bounds.x, bounds.y, bounds.width, bounds.height }, " ")
 end
 
+-- Cover a full 600 ms game tick of opening layout settlement before backing off to 10-tick checks.
+local SIDEBAR_SETTLE_TICKS = 40
+
+local function recordSettledBankHeight(self, liveHeight)
+    if liveHeight == nil or liveHeight <= 0 then return end
+    local rounded = round(liveHeight)
+    self.savedBankHeight = rounded
+    if self.persistedBankHeight ~= rounded and self.saveBankHeight ~= nil then
+        if self.saveBankHeight(rounded) then self.persistedBankHeight = rounded end
+    end
+end
+
+local function syncSidebarSize(self, content)
+    if not self.expanded then return end
+    local liveHeight = self.LiveBankHeight ~= nil and self:LiveBankHeight() or nil
+    local settling = (self.sidebarSettleTicks or 0) > 0
+    if self.settlingOpenHeight then
+        if liveHeight ~= nil and self.savedBankHeight ~= nil and liveHeight >= self.savedBankHeight then
+            self.settlingOpenHeight = false
+            if liveHeight == self.savedBankHeight and liveHeight ~= self.openingBankHeight then
+                self.sidebarSettleTicks = 0
+                settling = false
+            end
+        elseif not settling then
+            self.settlingOpenHeight = false
+        end
+    end
+    -- Only save once opening settlement finishes so intermediate default heights cannot overwrite savedBankHeight.
+    if not self.settlingOpenHeight and not settling and liveHeight ~= nil
+        and (self.savedBankHeight == nil or round(liveHeight) ~= self.savedBankHeight) then
+        recordSettledBankHeight(self, liveHeight)
+    end
+    content = content or BankInterface.Find(COMPONENTS.content)
+    local height = content ~= nil and content.height or 0
+    if self.ResizeSidebar ~= nil then self:ResizeSidebar(height > 0 and height or nil) end
+end
+
 function BankWindow:WatchBankWindow()
+    local content = self.expanded and BankInterface.Find(COMPONENTS.content) or nil
     -- Some native interactions reset the content offset without replacing its handle.
     if self.active and self.expanded and not self.detachedSidebar and not self:IsPresetViewOpen() then
         local record = self.windowRecord.value
-        local content = BankInterface.Find(COMPONENTS.content)
         local layout = content ~= nil and tryReadPartLayout(content) or nil
         if record ~= nil and record.sidebarWidth > 0 and layout ~= nil
             and content.hidden ~= true and content.height > 0 then
@@ -631,11 +668,7 @@ function BankWindow:WatchBankWindow()
     end
     -- Bank panels can change without events, even when no plugin page is open.
     self.onChange()
-    if self.expanded then
-        local content = BankInterface.Find(COMPONENTS.content)
-        local height = content ~= nil and content.height or 0
-        if height > 0 then self:ResizeSidebar(height) end
-    end
+    syncSidebarSize(self, content)
     local signature = describeBankWindowMeasurements(self:ReadBankWindowMeasurements())
     if signature == self.lastBankWindowMeasurements then return end
     self.lastBankWindowMeasurements = signature
@@ -647,19 +680,30 @@ end
 function BankWindow:StartBankWindowWatch()
     self:StopBankWindowWatch()
     self.windowSession = self.windowSession + 1
+    self.sidebarSettleTicks = SIDEBAR_SETTLE_TICKS
     -- Give each bank opening its own listener.
     self.bankWindowWatch = Config.CORE_REF .. "_bank_window_watch:"
         .. string.match(tostring(self), "%x+$") .. ":" .. self.windowSession
     local ticks = 0
     Event.Logic.Subscribe(self.bankWindowWatch, function()
         ticks = ticks + 1
-        if ticks < BANK_WINDOW_CHECK_TICKS then return end
-        ticks = 0
-        self:WatchBankWindow()
+        if ticks >= BANK_WINDOW_CHECK_TICKS then
+            ticks = 0
+            if (self.sidebarSettleTicks or 0) > 0 then
+                self.sidebarSettleTicks = self.sidebarSettleTicks - 1
+            end
+            self:WatchBankWindow()
+            return
+        end
+        if (self.sidebarSettleTicks or 0) > 0 then
+            self.sidebarSettleTicks = self.sidebarSettleTicks - 1
+            syncSidebarSize(self)
+        end
     end)
 end
 
 function BankWindow:StopBankWindowWatch()
+    self.sidebarSettleTicks = 0
     if self.bankWindowWatch == nil then return end
     self.windowSession = self.windowSession + 1
     Event.Logic.Unsubscribe(self.bankWindowWatch)
@@ -699,8 +743,13 @@ end
 -- Find the bank parts, add sidebar space, and watch window changes
 local function applyWindow(self)
     self.components = lookUpParts()
-    debugLog("window parts located; recovering saved geometry")
     local all = self.components.all
+    if all == nil or self.components.content == nil then
+        debugLog("window parts unavailable on immediate attach; deferring to readiness retry")
+        self.components = {}
+        return false
+    end
+    debugLog("window parts located; recovering saved geometry")
 
     -- Undo leftover expansion before adding sidebar space.
     if not BankWindow.RecoverExpansion(self.components, self.windowRecord.value) then
@@ -715,6 +764,9 @@ local function applyWindow(self)
     debugLog("reading All Items selection")
     self.nativeViewAll = self:DetectNativeViewAll() == true
     self.detachedSidebar = classicUI()
+    local liveHeight = all ~= nil and type(all.height) == "number" and all.height > 0 and all.height or 0
+    self.openingBankHeight = liveHeight
+    self.settlingOpenHeight = self.savedBankHeight ~= nil and self.savedBankHeight ~= liveHeight
     if self.detachedSidebar then
         local cleared, reason = self.windowRecord:Clear()
         if not cleared then error(reason, 0) end
@@ -850,6 +902,15 @@ function BankWindow:Restore()
             failure = failure or message
         end
     end
+    if self.active and self.LiveBankHeight ~= nil then
+        step(function()
+            local liveHeight = self:LiveBankHeight()
+            if liveHeight ~= nil and (self.savedBankHeight == nil
+                or (not self.settlingOpenHeight and round(liveHeight) ~= self.savedBankHeight)) then
+                recordSettledBankHeight(self, liveHeight)
+            end
+        end)
+    end
     step(function() self.pageState:Restore() end)
     self.shownPage = nil
     self.nativeViewAll = false
@@ -858,6 +919,8 @@ function BankWindow:Restore()
     if self.active then step(function() self:RestoreBankWindowSizeAndPosition() end) end
     self.active = false
     self.expanded = false
+    self.openingBankHeight = nil
+    self.settlingOpenHeight = false
     if self.sidebarOpeningState ~= "expanded" then self.sidebarMode = nil end
     self.peekRail = false
     self.expansionRecord = nil

@@ -6,6 +6,14 @@ local CorePreferences = {}
 -- Keep the order of unloaded plugins too.
 local MAX_RAIL_ORDER = 64
 local ID_LENGTH = 64
+local MAX_BANK_HEIGHT = 100000
+
+local function readBankHeight(value)
+    if type(value) ~= "number" or value ~= value or value < 1 or value > MAX_BANK_HEIGHT or value % 1 ~= 0 then
+        return nil
+    end
+    return math.floor(value)
+end
 
 function CorePreferences.defaults()
     return { enableDebug = false,
@@ -67,6 +75,7 @@ function CorePreferences.load()
     value.sidebarKeybind = CorePreferences.ReadKeybind(saved.sidebarKeybind) or value.sidebarKeybind
     value.railPeekKeybind = CorePreferences.ReadKeybind(saved.railPeekKeybind) or value.railPeekKeybind
     value.railOrder = readRailOrder(saved.railOrder)
+    value.bankHeight = readBankHeight(saved.bankHeight)
     return value
 end
 
@@ -83,7 +92,8 @@ function CorePreferences.save(value)
                 sidebarEdge = value.sidebarEdge == "right" and "right" or "left",
                 sidebarKeybind = keybind, railPeekKeybind = peekKeybind,
                 sidebarOpeningState = state, railPeekEnabled = value.railPeekEnabled == true,
-                railOrder = value.railOrder })
+                railOrder = value.railOrder,
+                bankHeight = readBankHeight(value.bankHeight) })
     end)
     return ok and saved ~= false
 end
