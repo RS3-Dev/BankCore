@@ -45,7 +45,7 @@ end
 
 local function unsubscribeLogic()
     if Event ~= nil and Event.Logic ~= nil and Event.Logic.Unsubscribe ~= nil then
-        pcall(Event.Logic.Unsubscribe, EVENT_KEY)
+        pcall(function() Event.Logic.Unsubscribe(EVENT_KEY) end)
     end
 end
 
@@ -189,12 +189,15 @@ local function sameComponent(first, second)
 end
 
 function AllItemsHint.new(shouldShow)
-    -- Recover any overlay left behind by an interrupted reload.
-    unsubscribeLogic()
-    clearGlobalRoot(nil)
+    -- Recover any overlay left behind by an interrupted reload without touching Event.Logic on clean startup.
+    if rawget(_G, ROOT_KEY) ~= nil then
+        unsubscribeLogic()
+        clearGlobalRoot(nil)
+    end
     return setmetatable({
         shouldShow = shouldShow or function() return true end,
         active = false,
+        subscribed = false,
         ticks = 0,
         parent = nil,
         root = nil,
@@ -211,10 +214,12 @@ end
 
 function AllItemsHint:Clear()
     local root = self.root
-    if not self.active and root == nil then return end
+    local wasSubscribed = self.subscribed == true
+    if not self.active and root == nil and not wasSubscribed then return end
     self.active = false
+    self.subscribed = false
     self.ticks = 0
-    unsubscribeLogic()
+    if wasSubscribed then unsubscribeLogic() end
     if root ~= nil then
         pcall(function() root.hidden = true end)
         destroyControl(root)
@@ -271,6 +276,7 @@ end
 
 function AllItemsHint:Tick()
     if not self.active then
+        self.subscribed = false
         unsubscribeLogic()
         return
     end
@@ -321,6 +327,7 @@ function AllItemsHint:Show()
         self.active = true
         self:Position()
         Event.Logic.Subscribe(EVENT_KEY, function() self:Tick() end)
+        self.subscribed = true
     end)
     if not ok then
         self:Clear()
