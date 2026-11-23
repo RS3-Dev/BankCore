@@ -112,9 +112,11 @@ function BankSession.new(options)
         sidebarOpeningState = session.preferences.sidebarOpeningState,
         expansionDirection = session.preferences.expansionDirection,
         sidebarEdge = session.preferences.sidebarEdge,
+        bankHeight = session.preferences.bankHeight,
         windowRecord = options.windowRecord or BankWindowRecord.load(),
         readRailOrder = function() return session.preferences.railOrder end,
         saveRailOrder = function(railOrder) return session:SavePreference("railOrder", railOrder) end,
+        saveBankHeight = function(height) return session:SavePreference("bankHeight", height) end,
     })
     local pageOptions = {
         isInGame = function() return session.inGame end,
@@ -369,6 +371,11 @@ function BankSession:ResetGeometry()
     end
     local cleared, reason = self.layout.windowRecord:Clear()
     if not cleared then return false, reason end
+    self.layout.savedBankHeight = nil
+    self.layout.persistedBankHeight = nil
+    if self.preferences ~= nil and self.preferences.bankHeight ~= nil then
+        self:SavePreference("bankHeight", nil)
+    end
     self.layout.lastBankWindowMeasurements = nil
     return true
 end

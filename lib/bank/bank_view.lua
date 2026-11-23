@@ -42,12 +42,19 @@ function BankView.new(options)
         sidebarEdge = options.sidebarEdge == "right" and "right" or "left",
         -- Plugin tabs in the player's saved order.
         extensionTabs = {},
-        -- The session supplies functions to load and save tab order.
+        -- The session supplies functions to load and save tab order and settled height.
         readRailOrder = options.readRailOrder or function() return {} end,
         saveRailOrder = options.saveRailOrder or function() return false end,
+        savedBankHeight = options.bankHeight,
+        persistedBankHeight = options.bankHeight,
+        saveBankHeight = options.saveBankHeight or function() return false end,
+        openingBankHeight = nil,
+        settlingOpenHeight = false,
         -- Identifies this bank opening for notifications.
         windowSession = 0,
         bankWindowWatch = nil,
+        sidebarSettleTicks = 0,
+        tabMountBounds = nil,
         nativeViewAll = false,
         itemHover = nil,
         onChange = function() end,

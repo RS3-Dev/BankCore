@@ -1,7 +1,9 @@
 -- Draw plugin tabs and the selected sidebar content.
 
+local BankInterface = require("lib/core/bank_interface")
 local Config = require("lib/core/config")
-local debugLog = require("lib/core/debug_log").Write
+local DebugLog = require("lib/core/debug_log")
+local debugLog = DebugLog.Write
 local SidebarFrame = require("lib/ui/sidebar_frame")
 
 local SidebarHost = {}
@@ -71,7 +73,39 @@ end
 function SidebarHost:CloseTabMount()
     local columnMount = self.tabMount
     self.tabMount = nil
+    self.tabMountBounds = nil
     if columnMount ~= nil then columnMount:Close() end
+end
+
+local function positiveNumber(value)
+    return type(value) == "number" and value > 0 and value or nil
+end
+
+local function boundsMatch(current, target)
+    return current ~= nil
+        and current.x == target.x
+        and current.y == target.y
+        and current.width == target.width
+        and current.height == target.height
+end
+
+local function describeSidebarHeights(self, bounds)
+    local all = (id ~= nil and id.Component ~= nil and id.Component.BANK__ALL ~= nil
+        and BankInterface.Find(id.Component.BANK__ALL))
+        or (self.components ~= nil and self.components.all or nil)
+    local host = self.components ~= nil and self.components.host or nil
+    local content = (id ~= nil and id.Component ~= nil and id.Component.BANK__CONTENT ~= nil
+        and BankInterface.Find(id.Component.BANK__CONTENT))
+        or (self.components ~= nil and self.components.content or nil)
+    return string.format("bounds=%s rail=%s root=%s all=%s host=%s content=%s saved=%s settling=%s",
+        tostring(bounds and bounds.height),
+        tostring(self.rail and self.rail.height),
+        tostring(self.sidebarRoot and self.sidebarRoot.height),
+        tostring(all and all.height),
+        tostring(host and host.height),
+        tostring(content and content.height),
+        tostring(self.savedBankHeight),
+        tostring(self.settlingOpenHeight == true))
 end
 
 -- Replace the sidebar content when selection changes.
@@ -81,15 +115,66 @@ function SidebarHost:RefreshTabMount(tab)
     if columnMount == nil or self.tabMount == columnMount then return end
     -- Leave room for the outline.
     local overlayParent = self.detachedSidebar and self.sidebarOverlay or self.components.all
-    if columnMount:Open(self.rail, overlayParent, self:TabMountBounds()) then
+    local bounds = self:TabMountBounds()
+    if DebugLog.IsEnabled() then
+        debugLog("Bank Core mounting sidebar tab ", tostring(tab.extensionID or tab.id), ": ",
+            describeSidebarHeights(self, bounds))
+    end
+    if columnMount:Open(self.rail, overlayParent, bounds) then
         self.tabMount = columnMount
+        self.tabMountBounds = bounds
     end
     SidebarFrame.RaiseEdges(self)
 end
 
+function SidebarHost:LiveBankHeight()
+    local all = (id ~= nil and id.Component ~= nil and id.Component.BANK__ALL ~= nil
+        and BankInterface.Find(id.Component.BANK__ALL))
+        or (self.components ~= nil and self.components.all or nil)
+    return positiveNumber(all ~= nil and all.height or nil)
+        or positiveNumber(self.sidebarRoot ~= nil and self.sidebarRoot.height or nil)
+end
+
+-- Hold the saved settled bank height across transient opening steps until live height catches up.
 function SidebarHost:TabMountBounds()
+    local hostHeight = self:LiveBankHeight()
+    if self.settlingOpenHeight and self.savedBankHeight ~= nil then
+        hostHeight = self.savedBankHeight
+    end
+    local railHeight
+    if hostHeight ~= nil then
+        railHeight = SidebarFrame.ColumnHeight(hostHeight, RAIL_Y)
+    else
+        railHeight = positiveNumber(self.rail ~= nil and self.rail.height or nil)
+        if railHeight == nil then
+            local fallbackHeight = positiveNumber(self.sidebarHeight)
+            railHeight = fallbackHeight ~= nil and SidebarFrame.ColumnHeight(fallbackHeight, RAIL_Y) or 0
+        end
+    end
     return { x = 1, y = 1, width = Config.SIDEBAR_COLUMN_WIDTH - 10,
-        height = math.max(0, self.rail.height - 2) }
+        height = math.max(0, railHeight - 2) }
+end
+
+-- Sync the mounted plugin column whenever settled bounds differ from its current size.
+function SidebarHost:SyncTabMountBounds()
+    if self.rail == nil or self.tabMount == nil then return false end
+    local bounds = self:TabMountBounds()
+    local previous = self.tabMount.bounds or self.tabMountBounds
+    if boundsMatch(previous, bounds) then return false end
+    if DebugLog.IsEnabled() then
+        debugLog("Bank Core resizing sidebar mount from ", tostring(previous and previous.height),
+            " to ", tostring(bounds.height), " (", describeSidebarHeights(self, bounds), ")")
+    end
+    self.tabMount:Resize(bounds)
+    -- Show why the content failed to resize.
+    if self.tabMount ~= nil and not self.tabMount:IsMounted() then
+        self.tabMount = nil
+        self.tabMountBounds = nil
+        self:RefreshSidebar()
+    elseif self.tabMount ~= nil then
+        self.tabMountBounds = bounds
+    end
+    return true
 end
 
 -- Show the selected content or explain why it is unavailable.
@@ -164,17 +249,14 @@ end
 
 -- Resize the sidebar and its plugin content.
 function SidebarHost:ResizeSidebar(height)
-    if self.rail == nil or height == self.sidebarHeight then return end
-    self.sidebarHeight = height
-    SidebarFrame.Resize(self, height)
-    if self.tabMount ~= nil then
-        self.tabMount:Resize(self:TabMountBounds())
-        -- Show why the content failed to resize.
-        if not self.tabMount:IsMounted() then
-            self.tabMount = nil
-            self:RefreshSidebar()
-        end
+    if self.rail == nil then return end
+    if height ~= nil and height > 0 and height ~= self.sidebarHeight then
+        self.sidebarHeight = height
+        SidebarFrame.Resize(self, height)
+    elseif self.tabRail ~= nil and self.tabRail.bottomInset ~= nil then
+        self.tabRail:SetHeight(0)
     end
+    self:SyncTabMountBounds()
 end
 
 -- Remove the sidebar and its contents.
